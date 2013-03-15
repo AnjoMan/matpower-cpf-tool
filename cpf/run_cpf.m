@@ -35,11 +35,11 @@ fprintf('This is my test');
 %   under other licensing terms, the licensors of MATPOWER grant
 %   you additional permission to convey the resulting work.
 
-casename = 'case30';%'case6bus'; %'case30'
+casename = 'case6bus';%'case30';%'case6bus'; %'case30'
 
 %% test cpf
 fprintf('\n------------testing continuation power flow (CPF) solver\n');
-loadvarloc = 7;%6;%7                 % bus number at which load changes
+loadvarloc = 6;%6;%7                 % bus number at which load changes
 sigmaForLambda = 0.2;%0.05;          % stepsize for Lambda
 sigmaForVoltage = 0.05;%0.025;       % stepsize for voltage
 [max_lambda, predicted_list, corrected_list, combined_list, success, et] = cpf(casename, loadvarloc, sigmaForLambda, sigmaForVoltage);

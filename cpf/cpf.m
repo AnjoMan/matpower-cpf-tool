@@ -94,12 +94,25 @@ pv_bus = ~isempty(find(pv == loadvarloc_i));
 %% initialize parameters
 % set lambda to be increasing
 flag_lambdaIncrease = true;  % flag indicating lambda is increasing or decreasing
-if bus(loadvarloc_i, PD) == 0
-    initQPratio = 0;
-    fprintf('\t[Warning]:\tLoad real power at bus %d is 0. Q/P ratio will be fixed at 0.\n', loadvarloc);
-else
-    initQPratio = bus(loadvarloc_i, QD)./bus(loadvarloc_i, PD);
+
+%get all QP ratios
+initQPratio = bus(:,QD)./bus(:,PD);
+if any(isnan(initQPratio)), 
+	fprintf('\t[Warning]:\tLoad real power at bus %d is 0. Q/P ratio will be fixed at 0.\n', find(isnan(initQPratio))); 
+	initQPratio(isnan(initQPratio)) = 0;
 end
+
+% if bus(loadvarloc_i, PD) == 0
+%     initQPratio = 0;
+%     fprintf('\t[Warning]:\tLoad real power at bus %d is 0. Q/P ratio will be fixed at 0.\n', loadvarloc);
+% else
+%     initQPratio = bus(loadvarloc_i, QD)./bus(loadvarloc_i, PD);
+% end
+
+%get participation factors as original level as % of net load:
+participation = bus(:,PD)./sum(bus(:,PD));
+loadvarloc_i=participation;
+
 lambda0 = 0; 
 lambda = lambda0;
 Vm = ones(size(bus, 1), 1);          %% flat start

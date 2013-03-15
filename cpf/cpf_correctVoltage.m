@@ -40,10 +40,25 @@ function [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Y
 %% get bus index lists of each type of bus
 [ref, pv, pq] = bustypes(bus, gen);
 
+
+
 %% set load as lambda indicates
 lambda = lambda_predicted;
-bus(loadvarloc, PD) = lambda*baseMVA;
-bus(loadvarloc, QD) = lambda*baseMVA*initQPratio;
+
+%participation factors
+participation = loadvarloc;
+
+mP = participation.*lambda.*baseMVA;
+mQ = mP .* initQPratio;
+
+bus(:,PD) = mP;
+bus(:,QD) = mQ;
+% bus(loadvarloc, PD) = lambda*baseMVA;
+% bus(loadvarloc, QD) = lambda*baseMVA*initQPratio;
+
+fprintf('P: '); fprintf('\t%f', bus(:,PD)); fprintf('\n');
+fprintf('Q: '); fprintf('\t%f', bus(:,QD)); fprintf('\n');
+fprintf('lambda:');fprintf('\t%f', lambda); fprintf('\n');
 
 %% compute complex bus power injections (generation - load)
 SbusInj = makeSbus(baseMVA, bus, gen);
@@ -54,3 +69,4 @@ V0 = V_predicted; % use predicted voltage to set the initial guess
 %% run power flow to get solution of the current point
 mpopt = mpoption('VERBOSE', 0);
 [V, success, iterNum] = newtonpf(Ybus, SbusInj, V0, ref, pv, pq, mpopt); %% run NR's power flow solver
+fprintf('V: '); fprintf('\t%f',V); fprintf('\n');
