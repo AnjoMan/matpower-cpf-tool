@@ -36,6 +36,8 @@ function [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, 
 %   under other licensing terms, the licensors of MATPOWER grant
 %   you additional permission to convey the resulting work.
 
+participation = loadvarloc;
+
 %% set up indexing
 npv = length(pv);
 npq = length(pq);
@@ -58,29 +60,59 @@ j22 = imag(dSbus_dVm(pq, pq));
 J = [   j11 j12;
         j21 j22;    ];
 
-%% form K
-K = zeros(npv+2*npq, 1);
-if pv_bus % pv bus
-    K(find(pv == loadvarloc)) = -1;                         % corresponding to deltaP
-else % pq bus
-    K(npv + find(pq == loadvarloc)) = -1;                   % corresponding to deltaP
-    K(npv + npq + find(pq == loadvarloc)) = -initQPratio;   % corresponding to deltaQ
-end
+
+% form K based on participation factors.
+participation = participation ./sum(participation); %normalize
+K = zeros(npv+2*npq,1);
+% 
+% K(pv) = participation(pv);
+% K(npv+pq) = participation(pq);
+% K(npv+npq+pq) = participation(pq).*initQPratio;
+K(1:length(pv)) = participation(pv);
+K(npv + (1:length(pq))) = -participation(pq);
+K(npv+npq+(1:length(pq))) = -participation(pq) .* initQPratio(pq);
+
+% %% form K
+% K = zeros(npv+2*npq, 1);
+% if pv_bus % pv bus
+%     K(find(pv == loadvarloc)) = -1;                         % corresponding to deltaP
+% else % pq bus
+%     K(npv + find(pq == loadvarloc)) = -1;                   % corresponding to deltaP
+%     K(npv + npq + find(pq == loadvarloc)) = -initQPratio;   % corresponding to deltaQ
+% end
 
 %% form e
+
 e = zeros(1, npv+2*npq+1);
-if type_predict == 1 % predict voltage
+if type_predict(1) == 1 % predict voltage
     if flag_lambdaIncrease == true
         e(npv+2*npq+1) = 1; % dLambda = 1
     else
         e(npv+2*npq+1) = -1; % dLambda = -1
     end
-elseif type_predict == 2 % predict lambda
-    e(npv+npq+find(pq == loadvarloc)) = -1; % dVm = -1
+elseif type_predict(1) == 2 % predict lambda
+		% [Anton] we have to discriminate between pv and pq bus because in the
+	% original CPF, the changing load was used as the voltage continuation
+	% parameter, so using pv bus would be nonsensical. now we use whichever
+	% bus changes the most, so pv bus must be considered
+	
+	
+	%each bus has an angle, plus all PQ busses have a Voltage
+	continuationBus = type_predict(2);%% [Anton] used type_predict to pass in bus value I want for voltage continuation
+	
+	if any(pq == continuationBus),
+		e(npv + npq + find(pq == continuationBus)) = -1;
+	elseif any(pv==continuationBus),
+		e(find(pv==continuationBus)) = -1;
+	end
+    %e(npv+npq+find(pq == loadvarloc)) = -1; % dVm = -1
 else
     fprintf('Error: unknow ''type_predict''.\n');
     pause
 end
+
+% form of e is expected to be [ delta * (#pv buses + #pq buses), v* #pq
+% buses) + 1]
 
 %% form b
 b = zeros(npv+2*npq+1, 1);

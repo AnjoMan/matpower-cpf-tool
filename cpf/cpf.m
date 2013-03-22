@@ -112,6 +112,7 @@ end
 %get participation factors as original level as % of net load:
 participation = bus(:,PD)./sum(bus(:,PD));
 loadvarloc_i=participation;
+loadvarloc = participation; %this may be wrong because of internal v.s. external bus numbering
 
 lambda0 = 0; 
 lambda = lambda0;
@@ -154,7 +155,8 @@ while i < max_iter
     [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, loadvarloc_i);
 
     %% calculate slope (dP/dLambda) at current point
-    slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
+	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda/lambda_saved)); %calculate maximum slope at current point.
+    %slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
 
     %% instead of using condition number as criteria for switching between
     %% modes...
@@ -200,13 +202,14 @@ while k < max_iter
     lambda_saved = lambda;
 
     %% do lambda prediction to find predicted point (predicting lambda)
-    [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigmaForVoltage, 2, initQPratio, loadvarloc);
+    [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigmaForVoltage, [2, continuationBus], initQPratio, loadvarloc);
     %% do lambda correction to find corrected point
     Vm_assigned = abs(V_predicted);
-    [V, lambda, success, iterNum] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, loadvarloc, ref, pv, pq);
+    [V, lambda, success, iterNum] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, loadvarloc, ref, pv, pq, continuationBus);
 
     %% calculate slope (dP/dLambda) at current point
-    slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
+	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda/lambda_saved)); %calculate maximum slope at current point.
+    % slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
 
     %% instead of using condition number as criteria for switching between
     %% modes...
@@ -257,7 +260,8 @@ while i < max_iter
     [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, loadvarloc_i);
 
     %% calculate slope (dP/dLambda) at current point
-    slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
+	slope = min( abs( V-V_saved)./(lambda-lambda_saved));
+%     slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
 
     if lambda < 0 % lambda is less than 0, then stops CPF simulation
         if verbose > 0
