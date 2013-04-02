@@ -1,7 +1,8 @@
-function [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, loadvarloc)
+function [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation)
 %CPF_CORRECTVOLTAGE  Do correction for predicted voltage in cpf.
 %   [INPUT PARAMETERS]
-%   loadvarloc: (in internal bus numbering)
+%   participation: (in internal bus numbering) percentage of loading for
+%   each bus
 %   created by Rui Bo on 2007/11/12
 
 %   MATPOWER
@@ -46,9 +47,7 @@ function [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Y
 lambda = lambda_predicted;
 
 %participation factors
-participation = loadvarloc;
-
-mP = participation.*lambda.*baseMVA;
+mP = bus(:,PD) .*(participation == 0) + participation.*lambda.*baseMVA;
 mQ = mP .* initQPratio;
 
 bus(:,PD) = mP;

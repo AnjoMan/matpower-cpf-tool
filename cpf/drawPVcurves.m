@@ -68,7 +68,7 @@ for j = 1:length(busesToDraw)%for i = 1+npv+1:1+npv+npq
     hold on;
     
     %% plot PV curve
-    plot(lambda_corrected, Vm_corrected, 'bx-');
+    plot(lambda_corrected, Vm_corrected, 'bx-', 'Linewidth', 2);
     
     %% plot CPF prediction-correction curve
     if flag_combinedCurve == true

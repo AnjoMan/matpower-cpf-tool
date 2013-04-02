@@ -91,7 +91,7 @@ if type_predict(1) == 1 % predict voltage
         e(npv+2*npq+1) = -1; % dLambda = -1
     end
 elseif type_predict(1) == 2 % predict lambda
-		% [Anton] we have to discriminate between pv and pq bus because in the
+    % [Anton] we have to discriminate between pv and pq bus because in the
 	% original CPF, the changing load was used as the voltage continuation
 	% parameter, so using pv bus would be nonsensical. now we use whichever
 	% bus changes the most, so pv bus must be considered

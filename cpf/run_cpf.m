@@ -40,6 +40,8 @@ casename = 'case6bus';%'case30';%'case6bus'; %'case30'
 %% test cpf
 fprintf('\n------------testing continuation power flow (CPF) solver\n');
 loadvarloc = 6;%6;%7                 % bus number at which load changes
+ loadvarloc = [10,10, 20, 30, 20, 10]
+% loadvarloc = ones(1,30);
 sigmaForLambda = 0.2;%0.05;          % stepsize for Lambda
 sigmaForVoltage = 0.05;%0.025;       % stepsize for voltage
 [max_lambda, predicted_list, corrected_list, combined_list, success, et] = cpf(casename, loadvarloc, sigmaForLambda, sigmaForVoltage);
@@ -47,6 +49,6 @@ fprintf('maximum lambda is %f\n\n', max_lambda);
 
 %% draw PV curve
 flag_combinedCurve = true;
-busesToDraw = [];%[3:6];
+busesToDraw = [1:6];%[3:6];
 drawPVcurves(casename, loadvarloc, corrected_list, combined_list, flag_combinedCurve, busesToDraw);
 

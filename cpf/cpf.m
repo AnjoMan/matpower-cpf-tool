@@ -1,4 +1,4 @@
-function [max_lambda, predicted_list, corrected_list, combined_list, success, et] = cpf(casedata, loadvarloc, sigmaForLambda, sigmaForVoltage)
+function [max_lambda, predicted_list, corrected_list, combined_list, success, et] = cpf(casedata, participation, sigmaForLambda, sigmaForVoltage)
 %CPF  Run continuation power flow (CPF) solver.
 %   [INPUT PARAMETERS]
 %   loadvarloc: load variation location(in external bus numbering). Single
@@ -69,14 +69,30 @@ verbose = 1;
 slopeThresh_Phase1 = 0.5;       % PV curve slope shreshold for voltage prediction-correction (with lambda increasing)
 slopeThresh_Phase2 = 0.3;       % PV curve slope shreshold for lambda prediction-correction
 
+
 %% load the case & convert to internal bus numbering
+participation = participation(:);%(:) forces column vector
+
 [baseMVA, bus, gen, branch] = loadcase(casedata);
+[numBuses, ~] = size(bus);
+
+if length(participation) ~= numBuses, %improper number of participations given
+	if length(participation) == 1 && participation > 0 && isinteger(participation),%assume bus number is specified instead
+		participation = (1:numBuses)'==participation
+	else
+		fprintf('\t[Info]\tParticipation Factors improperly specified.\n\t\t\tAssuming uniform participation by all buses.\n');
+		participation = bus(:,PD)./sum(bus(:,PD));
+	end
+end
 [i2e, bus, gen, branch] = ext2int(bus, gen, branch);
 e2i = sparse(max(i2e), 1);
 e2i(i2e) = (1:size(bus, 1))';
-loadvarloc_i = e2i(loadvarloc);
+%loadvarloc_i = e2i(loadvarloc);
+participation_i = participation(e2i);
 
+participation_i = participation_i ./ sum(participation_i); %normalize
 %% get bus index lists of each type of bus
+
 [ref, pv, pq] = bustypes(bus, gen);
 
 %% generator info
@@ -87,9 +103,9 @@ gbus = gen(on, GEN_BUS);                %% what buses are they at?
 [Ybus, Yf, Yt] = makeYbus(baseMVA, bus, branch);
 
 %% set up indexing
-npv = length(pv);
-npq = length(pq);
-pv_bus = ~isempty(find(pv == loadvarloc_i));
+% npv = length(pv);
+% npq = length(pq);
+% pv_bus = ~isempty(find(pv == loadvarloc_i));
 
 %% initialize parameters
 % set lambda to be increasing
@@ -110,8 +126,8 @@ end
 % end
 
 %get participation factors as original level as % of net load:
-participation = bus(:,PD)./sum(bus(:,PD));
-loadvarloc_i=participation;
+% participation = bus(:,PD)./sum(bus(:,PD));
+loadvarloc_i=participation_i;
 loadvarloc = participation; %this may be wrong because of internal v.s. external bus numbering
 
 lambda0 = 0; 
@@ -126,7 +142,7 @@ pointCnt = 0;
 %% do voltage correction (ie, power flow) to get initial voltage profile
 lambda_predicted = lambda;
 V_predicted = V;
-[V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, loadvarloc_i);
+[V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 %% record data
 pointCnt = pointCnt + 1;
 corrected_list(:, pointCnt) = [V;lambda];
@@ -149,14 +165,16 @@ while i < max_iter
     lambda_saved = lambda;
     
     %% do voltage prediction to find predicted point (predicting voltage)
-    [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigmaForLambda, 1, initQPratio, loadvarloc, flag_lambdaIncrease);
+    [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigmaForLambda, 1, initQPratio, participation_i, flag_lambdaIncrease);
     
     %% do voltage correction to find corrected point
-    [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, loadvarloc_i);
+    [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 
     %% calculate slope (dP/dLambda) at current point
-	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda/lambda_saved)); %calculate maximum slope at current point.
+	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
     %slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
+	
+	fprintf('slope:\t%f\t| slope full:\t%f\n', (abs(V)-abs(V_saved))./(lambda-lambda_saved));
 
     %% instead of using condition number as criteria for switching between
     %% modes...
@@ -166,10 +184,14 @@ while i < max_iter
         % restore good data
         V = V_saved;
         lambda = lambda_saved;
-      
-        if verbose > 0
-            fprintf('\t[Info]:\tApproaching nose area of PV curve, or voltage correction fails.\n');
-        end
+        
+		if verbose > 0
+			if ~success, 
+				fprintf('\t[Info]:\tLambda correction fails.\n');
+			else
+				fprintf('\t[Info]:\tApproaching nose area of PV curve.\n');
+			end
+		end
         break;
     else
         if verbose > 2
@@ -202,13 +224,13 @@ while k < max_iter
     lambda_saved = lambda;
 
     %% do lambda prediction to find predicted point (predicting lambda)
-    [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigmaForVoltage, [2, continuationBus], initQPratio, loadvarloc);
+    [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigmaForVoltage, [2, continuationBus], initQPratio, participation_i);
     %% do lambda correction to find corrected point
     Vm_assigned = abs(V_predicted);
-    [V, lambda, success, iterNum] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, loadvarloc, ref, pv, pq, continuationBus);
+    [V, lambda, success, iterNum] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, participation_i, ref, pv, pq, continuationBus);
 
     %% calculate slope (dP/dLambda) at current point
-	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda/lambda_saved)); %calculate maximum slope at current point.
+	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
     % slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
 
     %% instead of using condition number as criteria for switching between
@@ -222,7 +244,11 @@ while k < max_iter
 
         %% ---change to voltage prediction-correction (lambda decreasing)
         if verbose > 0
-            fprintf('\t[Info]:\tLeaving nose area of PV curve, or lambda correction fails.\n');
+			if ~success, 
+				fprintf('\t[Info]:\tLambda correction fails.\n');
+			else
+				fprintf('\t[Info]:\tLeaving nose area of PV curve.\n');
+			end
         end
         break;
     else
@@ -254,10 +280,10 @@ while i < max_iter
     i = i + 1;
     
     %% do voltage prediction to find predicted point (predicting voltage)
-    [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigmaForLambda, 1, initQPratio, loadvarloc, flag_lambdaIncrease);
+    [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigmaForLambda, 1, initQPratio, participation_i, flag_lambdaIncrease);
     
     %% do voltage correction to find corrected point
-    [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, loadvarloc_i);
+    [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 
     %% calculate slope (dP/dLambda) at current point
 	slope = min( abs( V-V_saved)./(lambda-lambda_saved));
@@ -329,3 +355,19 @@ if verbose > 1
     pointCnt_Phase3
     pointCnt
 end
+
+%% Changelog - Anton Lodder - 2013.3.27
+% I implemented participation factor loading to allow all buses to
+% participate in load increase as a function of lambda.
+%
+% * Participation factors should be given as a vector, one value for each
+%   bus.
+% * if only one value is given, it is assumed that the value is a bus
+%   number rather than a  participation factor, and all other buses get a
+%   participation factor of zero (point two)
+% * any buses with zero participation factor will remain at their initial
+%   load level
+% * from the previous two bullets: backwards compatibility is maintained
+%   while allowing increased functionality
+% * if participation is not a valid bus number (eg float, negative number),
+%	maintains given bus loading levels

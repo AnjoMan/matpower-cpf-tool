@@ -69,11 +69,15 @@ pv_bus = ~isempty(find(pv == loadvarloc));
 %participation factors
 participation = loadvarloc;
 
-mP = participation.*lambda.*baseMVA;
+mP = bus(:,PD) .*(participation == 0) + participation.*lambda.*baseMVA;
 mQ = mP .* initQPratio;
 
 bus(:,PD) = mP;
 bus(:,QD) = mQ;
+
+fprintf('P: '); fprintf('\t%f', bus(:,PD)); fprintf('\n');
+fprintf('Q: '); fprintf('\t%f', bus(:,QD)); fprintf('\n');
+fprintf('lambda:');fprintf('\t%f', lambda); fprintf('\n');
 
 % bus(loadvarloc, PD) = lambda*baseMVA;
 % bus(loadvarloc, QD) = lambda*baseMVA*initQPratio;
@@ -168,7 +172,7 @@ while (~converged & i < max_it)
     Va = angle(V);          %% we wrapped around with a negative Vm
 
     %% set load as lambda indicates
-	mP = participation.*lambda.*baseMVA;
+	mP = bus(:,PD) .*(participation == 0) + participation.*lambda.*baseMVA;
 	mQ = mP .* initQPratio;
 
 	bus(:,PD) = mP;
@@ -202,3 +206,5 @@ while (~converged & i < max_it)
 end
 
 iterNum = i;
+
+fprintf('V: '); fprintf('\t%f',V); fprintf('\n');
