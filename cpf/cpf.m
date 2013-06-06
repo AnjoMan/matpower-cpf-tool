@@ -192,8 +192,13 @@ while i < max_iter
         
 		if verbose > 0
 			if ~success, 
-				if ~isempty(strfind(lastwarn, 'singular')), fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n'); break;
-				else fprintf('\t[Info]:\tLambda correction fails.\n'); end
+				if ~isempty(strfind(lastwarn, 'singular')), 
+					fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n'); 
+					lastwarn('No error');
+					break;
+				else
+					fprintf('\t[Info]:\tLambda correction fails.\n'); 
+				end
 			else
 				fprintf('\t[Info]:\tApproaching nose area of PV curve.\n');
 			end
@@ -262,6 +267,7 @@ while k < max_iter
 			if ~success, 
 				if ~isempty(strfind(lastwarn, 'singular'))
 					fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n');
+					lastwarn('No error');
 					break;
 				else
 					fprintf('\t[Info]:\tLambda correction fails.\n');
@@ -331,6 +337,7 @@ while i < max_iter
         if verbose > 0
 			if ~isempty(strfind(lastwarn, 'singular'))
 				fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n');
+				lastwarn('No error');
 				break;
 			else
 				fprintf('\t[Info]:\tVoltage correction step fails..\n');

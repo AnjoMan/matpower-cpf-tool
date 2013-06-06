@@ -40,6 +40,12 @@ function [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, 
 	%% set up indexing
 	npv = length(pv);
 	npq = length(pq);
+	
+	
+	Vangles_pv = 1:npv;
+	Vangles_pq = npv+1:npv+npq;
+	Vmag_pq = npv+npq+1:npv+2*npq;
+	lambdaIndex = npv+2*npq + 1;
 
 	%% form current variable set from given voltage
 	x_current = [ angle(V([pv;pq]));
@@ -86,9 +92,9 @@ function [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, 
 
 	%% convert variable set to voltage form
 	V_predicted(ref, 1) = V([ref]); %reference bus voltage passes through
-	V_predicted(pv, 1) = abs(V(pv)).* exp(sqrt(-1) * x_predicted(1:npv) ); %apply new angle to 
-	V_predicted(pq, 1) = x_predicted(npv+npq+1:npv+2*npq).* exp(sqrt(-1) * x_predicted(npv+1:npv+npq) );
-	lambda_predicted = x_predicted(npv+2*npq+1);
+	V_predicted(pv, 1) = abs(V(pv)).* exp(sqrt(-1) * x_predicted(Vangles_pv) ); %apply new angle to 
+	V_predicted(pq, 1) = x_predicted(Vmag_pq).* exp(sqrt(-1) * x_predicted(Vangles_pq) );
+	lambda_predicted = x_predicted(lambdaIndex);
 
 end
 

@@ -38,19 +38,17 @@ function [V, lambda, converged, iterNum] = cpf_correctLambda(baseMVA, bus, gen, 
 %   you additional permission to convey the resulting work.
 
 %% define named indices into bus, gen, branch matrices
-	[PQ, PV, REF, NONE, BUS_I, BUS_TYPE, PD, QD, GS, BS, BUS_AREA, VM, ...
-		VA, BASE_KV, ZONE, VMAX, VMIN, LAM_P, LAM_Q, MU_VMAX, MU_VMIN] = idx_bus;
+% 	[PQ, PV, REF, NONE, BUS_I, BUS_TYPE, PD, QD, GS, BS, BUS_AREA, VM, ...
+% 		VA, BASE_KV, ZONE, VMAX, VMIN, LAM_P, LAM_Q, MU_VMAX, MU_VMIN] = idx_bus;
+	[~, ~, ~, ~, ~, ~, PD, QD, ~, ~, ~, ~, ~, ~, ~, ~, ~, ~, ~, ~, ~] = idx_bus;
 
 
 	%% options
-	tol     = 1e-5; % mpopt(2);
-	max_it  = 100;  % mpopt(3);
+	tolerance     = 1e-5; % mpopt(2);
+	max_iters  = 100;  % mpopt(3);
 	verbose = 0;    % mpopt(31);
-
+	
 	%% initialize
-	% j = sqrt(-1);
-	converged = 0;
-	i = 0;
 	V = V_predicted;
 	lambda = lambda_predicted;
 	Va = angle(V);
@@ -59,117 +57,87 @@ function [V, lambda, converged, iterNum] = cpf_correctLambda(baseMVA, bus, gen, 
 	%% set up indexing for updating V
 	npv = length(pv);
 	npq = length(pq);
-	j1 = 1;         j2 = npv;           %% j1:j2 - V angle of pv buses
-	j3 = j2 + 1;    j4 = j2 + npq;      %% j3:j4 - V angle of pq buses
-	j5 = j4 + 1;    j6 = j4 + npq;      %% j5:j6 - V mag of pq buses
-	j7 = j6 + 1;                        %% j7 - lambda
-
+	
 	Vangles_pv = 1:npv;
 	Vangles_pq = npv+1:npv+npq;
 	Vmag_pq = npv+npq+1:npv+2*npq;
 	lambdaIndex = npv+2*npq + 1;
-	%pv_bus = ~isempty(find(pv == loadvarloc));
-
-	%% set load as lambda indicates
-
-	mP = bus(:,PD) .*(participation == 0) + participation.*lambda.*baseMVA;
-	mQ = mP .* initQPratio;
-
-	bus(:,PD) = mP;
-	bus(:,QD) = mQ;
-
-
-	%% compute complex bus power injections (generation - load)
-	SbusInj = makeSbus(baseMVA, bus, gen);
-
-	%% evalute F(x0)
-	F = Feval(V,Vm_assigned, SbusInj, Ybus, pv, pq, continuationBus);
-
-	
-	
+		
+	%% update bus and calculate power flow value at current V
+	[bus, F] = updatePF(bus);
 	
 	%% do Newton iterations
-	while (~converged && i < max_it)
-		%% update iteration counter
+	i = 0;
+	converged = false;
+	while (~converged && i < max_iters)
 		i = i + 1;
 
 		%% evaluate Jacobian
 		J = getJ(Ybus, V, pv, pq);
 
-		%% evaluate dDeltaP/dLambda, dDeltaQ/dLambda, dDeltaVm/dLambda,
-		%% dDeltaVm/dVa, dDeltaVm/dVm
-	
+		%% form augmented Jacobian with V as continuation parameter
+		delF_dLambda = [-participation(pv); -participation(pq); -participation(pq) .* initQPratio(pq)];
+ 		delVm = [zeros(1, npv+npq) -participation(pq)' 0];
+			%dV/dangle = 0,  dV/dV = participations, dV/dlambda = 0;
 		
-		% form K based on participation factors.
-
-
-
-		dDeltaP_dLambda = [-participation(pv); -participation(pq)];
-		dDeltaQ_dLambda = -participation(pq) .* initQPratio(pq);
-
-		dDeltaVm_dLambda = zeros(1, 1);
-		dDeltaVm_dVa = zeros(1, npv+npq);
-		dDeltaVm_dVm = zeros(1, npq);
-		%dDeltaVm_dVm(1, find(pq == loadvarloc)) = -1;
-		dDeltaVm_dVm(:) = -participation(pq);
-
-		%% form augmented Jacobian
-		J12 = [dDeltaP_dLambda; 
-			   dDeltaQ_dLambda];
-		J21 = [dDeltaVm_dVa   dDeltaVm_dVm];
-		J22 = dDeltaVm_dLambda;
-		augJ = [    J   J12;
-					J21 J22;    ];
+		delVm = zeros(1, npv+npq*2 + 1);
+		delVm(npv+npq+find(pq == continuationBus)) = -1;
+		delVm(pv == continuationBus) = -1;
+		
+		augJ = [ J delF_dLambda;
+				  delVm          ];
 
 		%% compute update step
 		dx = -(augJ \ F);
 
+
 		%% update voltage. 
-		Va(pv) = Va(pv) + dx(Vangles_pv);
-		Va(pq) = Va(pq) + dx(Vangles_pq);
+		Va( [pv;pq] ) = Va( [pv;pq] ) + dx( [Vangles_pv Vangles_pq]);
 		Vm(pq) = Vm(pq) + dx(Vmag_pq);
 		lambda = lambda + dx(lambdaIndex);
 			% NOTE: voltage magnitude of pv buses, voltage magnitude
 			% and angle of reference bus are not updated, so they keep as constants
 			% (ie, the value as in the initial guess)
 
-		V = Vm .* exp(j * Va); % NOTE: angle is in radians in pf solver, but in degree in case data
+		V = Vm .* exp(1i * Va); % NOTE: angle is in radians in pf solver, but in degree in case data
 		Vm = abs(V);            %% update Vm and Va again in case
 		Va = angle(V);          %% we wrapped around with a negative Vm
+ 		
+		
+		[bus, F] = updatePF(bus);
+		
+		%% check for convergence
+		normF = norm(F, inf);
+		if verbose > 1,	fprintf('\niteration [%3d]\t\tnorm of mismatch: %10.3e', i, normF);	end
+		converged = normF < tolerance;
 
+	end
+
+	iterNum = i;
+	
+	
+	function [bus, F] = updatePF(bus)
 		%% set load as lambda indicates
-		mP = bus(:,PD) .*(participation == 0) + participation.*lambda.*baseMVA;
-		mQ = mP .* initQPratio;
-
-		bus(:,PD) = mP;
-		bus(:,QD) = mQ;
-	%     bus(loadvarloc, PD) = lambda*baseMVA;
-	%     bus(loadvarloc, QD) = lambda*baseMVA*initQPratio;
+		bus(:,PD) = bus(:,PD) .*(participation == 0) + participation.*lambda.*baseMVA;
+		bus(:,QD) = bus(:,PD) .* initQPratio;
 
 		%% compute complex bus power injections (generation - load)
 		SbusInj = makeSbus(baseMVA, bus, gen);
 
-		%% evalute F(x)
+		%% evalute F(x0)
 		F = Feval(V,Vm_assigned, SbusInj, Ybus, pv, pq, continuationBus);
-		
-		
-		
-		%% check for convergence
-		normF = norm(F, inf);
-		if verbose > 1
-			fprintf('\niteration [%3d]\t\tnorm of mismatch: %10.3e', i, normF);
-		end
-		if normF < tol
-			converged = 1;
-		end
 	end
-
-	iterNum = i;
-
-	% fprintf('V: '); fprintf('\t%f',V); fprintf('\n');
-
 end
+
+
+
+
 function F = Feval(V, Vm_assigned, SbusInj, Ybus, pv, pq, continuationBus)
+% F = Feval(V, Vm_assigned, SbusInj, Ybus, pv, pq, continuationBus)
+%
+% Feval   evaluate power flow equations
+%
+% Evaluates the power flow equations  S = V x V* / X
 	
 	%% calculate mismatch
 	mis = SbusInj -  (  V .* conj(Ybus * V)  );

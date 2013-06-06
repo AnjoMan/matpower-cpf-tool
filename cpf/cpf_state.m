@@ -170,14 +170,6 @@ i = 0;
 if verbose > 0  fprintf('Start Phase %d: %s.\n', state, states{state}); end
 
 while state < length(states) && i < max_iter
-	
-	
-	
-%% --- Start Phase 1: voltage prediction-correction (lambda increasing)
-
-
-
-
     i = i + 1;
     
     % save good data
