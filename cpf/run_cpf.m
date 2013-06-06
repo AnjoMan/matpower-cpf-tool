@@ -1,8 +1,7 @@
-function test_cpf
+function run_cpf
 
 
-
-fprintf('This is my test');
+fprintf('This modified by Anton');
 %TEST_CPF  Test continuation power flow (CPF).
 %   created by Rui Bo on 2007/11/12
 
@@ -40,15 +39,16 @@ casename = 'case6bus';%'case30';%'case6bus'; %'case30'
 %% test cpf
 fprintf('\n------------testing continuation power flow (CPF) solver\n');
 loadvarloc = 6;%6;%7                 % bus number at which load changes
- loadvarloc = [10,10, 20, 30, 20, 10]
+participation = [10,10, 20, 30, 20, 10];
 % loadvarloc = ones(1,30);
 sigmaForLambda = 0.2;%0.05;          % stepsize for Lambda
 sigmaForVoltage = 0.05;%0.025;       % stepsize for voltage
-[max_lambda, predicted_list, corrected_list, combined_list, success, et] = cpf(casename, loadvarloc, sigmaForLambda, sigmaForVoltage);
-fprintf('maximum lambda is %f\n\n', max_lambda);
+% [max_lambda, predicted_list, corrected_list, combined_list, success, et] = cpf(casename, loadvarloc, sigmaForLambda, sigmaForVoltage);
+cpfResults = cpf(casename, participation, sigmaForLambda, sigmaForVoltage);
+
+fprintf('maximum lambda is %f\n\n', cpfResults.max_lambda);
 
 %% draw PV curve
 flag_combinedCurve = true;
-busesToDraw = [1:6];%[3:6];
-drawPVcurves(casename, loadvarloc, corrected_list, combined_list, flag_combinedCurve, busesToDraw);
+drawPV(cpfResults);
 

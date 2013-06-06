@@ -1,4 +1,4 @@
-function [V, lambda, converged, iterNum] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, loadvarloc, ref, pv, pq, continuationBus)
+function [V, lambda, converged, iterNum] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, participation, ref, pv, pq, continuationBus)
 %CPF_CORRECTLAMBDA  Correct lambda in correction step near load point.
 %   function: correct lambda(ie, real power of load) in cpf correction step
 %   near the nose point. Use NR's method to solve the nonlinear equations
@@ -38,173 +38,167 @@ function [V, lambda, converged, iterNum] = cpf_correctLambda(baseMVA, bus, gen, 
 %   you additional permission to convey the resulting work.
 
 %% define named indices into bus, gen, branch matrices
-[PQ, PV, REF, NONE, BUS_I, BUS_TYPE, PD, QD, GS, BS, BUS_AREA, VM, ...
-    VA, BASE_KV, ZONE, VMAX, VMIN, LAM_P, LAM_Q, MU_VMAX, MU_VMIN] = idx_bus;
-
-%% options
-tol     = 1e-5; % mpopt(2);
-max_it  = 100;  % mpopt(3);
-verbose = 0;    % mpopt(31);
-
-%% initialize
-j = sqrt(-1);
-converged = 0;
-i = 0;
-V = V_predicted;
-lambda = lambda_predicted;
-Va = angle(V);
-Vm = abs(V);
-
-%% set up indexing for updating V
-npv = length(pv);
-npq = length(pq);
-j1 = 1;         j2 = npv;           %% j1:j2 - V angle of pv buses
-j3 = j2 + 1;    j4 = j2 + npq;      %% j3:j4 - V angle of pq buses
-j5 = j4 + 1;    j6 = j4 + npq;      %% j5:j6 - V mag of pq buses
-j7 = j6 + 1;                        %% j7 - lambda
-
-pv_bus = ~isempty(find(pv == loadvarloc));
-
-%% set load as lambda indicates
-%participation factors
-participation = loadvarloc;
-
-mP = bus(:,PD) .*(participation == 0) + participation.*lambda.*baseMVA;
-mQ = mP .* initQPratio;
-
-bus(:,PD) = mP;
-bus(:,QD) = mQ;
-
-fprintf('P: '); fprintf('\t%f', bus(:,PD)); fprintf('\n');
-fprintf('Q: '); fprintf('\t%f', bus(:,QD)); fprintf('\n');
-fprintf('lambda:');fprintf('\t%f', lambda); fprintf('\n');
-
-% bus(loadvarloc, PD) = lambda*baseMVA;
-% bus(loadvarloc, QD) = lambda*baseMVA*initQPratio;
-
-%% compute complex bus power injections (generation - load)
-SbusInj = makeSbus(baseMVA, bus, gen);
-
-%% evalute F(x0)
-mis = V .* conj(Ybus * V) - SbusInj;
-mis = -mis; % NOTE: use reverse mismatch and correspondingly use '(-)Jacobian" obtained from dSbus_dV 
-% F = [   real(mis(pv));
-%         real(mis(pq));
-%         imag(mis(pq));
-%         abs(V(loadvarloc)) - Vm_assigned(loadvarloc);   ];
-F = [   real(mis(pv));
-        real(mis(pq));
-        imag(mis(pq));
-        abs(V(continuationBus)) - Vm_assigned(continuationBus);   ];
-    
-%% do Newton iterations
-while (~converged & i < max_it)
-    %% update iteration counter
-    i = i + 1;
-
-    %% evaluate Jacobian
-    [dSbus_dVm, dSbus_dVa] = dSbus_dV(Ybus, V);
-
-    j11 = real(dSbus_dVa([pv; pq], [pv; pq]));
-    j12 = real(dSbus_dVm([pv; pq], pq));
-    j21 = imag(dSbus_dVa(pq, [pv; pq]));
-    j22 = imag(dSbus_dVm(pq, pq));
-
-    J = [   j11 j12;
-            j21 j22;    ];
-
-    %% evaluate dDeltaP/dLambda, dDeltaQ/dLambda, dDeltaVm/dLambda,
-    %% dDeltaVm/dVa, dDeltaVm/dVm
-%     dDeltaP_dLambda = zeros(npv+npq, 1);
-%     dDeltaQ_dLambda = zeros(npq, 1);
-%     if pv_bus % pv bus
-%         dDeltaP_dLambda(find(pv == loadvarloc)) = -1;                         % corresponding to deltaP
-%     else % pq bus
-%         dDeltaP_dLambda(npv + find(pq == loadvarloc)) = -1;                   % corresponding to deltaP
-%         dDeltaQ_dLambda(find(pq == loadvarloc)) = -initQPratio;   % corresponding to deltaQ
-% 	end
-
-	% form K based on participation factors.
-	participation = loadvarloc ./sum(loadvarloc); %normalize
+	[PQ, PV, REF, NONE, BUS_I, BUS_TYPE, PD, QD, GS, BS, BUS_AREA, VM, ...
+		VA, BASE_KV, ZONE, VMAX, VMIN, LAM_P, LAM_Q, MU_VMAX, MU_VMIN] = idx_bus;
 
 
+	%% options
+	tol     = 1e-5; % mpopt(2);
+	max_it  = 100;  % mpopt(3);
+	verbose = 0;    % mpopt(31);
 
-	%dDeltaP_dLambda = zeros(npv+npq, 1);
-	dDeltaP_dLambda(1:length(pv),1) = participation(pv);
-	dDeltaP_dLambda(npv + (1:length(pq)),1) = -participation(pq);
-	%dDeltaQ_dLambda = zeros(npq, 1);
-	dDeltaQ_dLambda = -participation(pq) .* initQPratio(pq);
+	%% initialize
+	% j = sqrt(-1);
+	converged = 0;
+	i = 0;
+	V = V_predicted;
+	lambda = lambda_predicted;
+	Va = angle(V);
+	Vm = abs(V);
 
+	%% set up indexing for updating V
+	npv = length(pv);
+	npq = length(pq);
+	j1 = 1;         j2 = npv;           %% j1:j2 - V angle of pv buses
+	j3 = j2 + 1;    j4 = j2 + npq;      %% j3:j4 - V angle of pq buses
+	j5 = j4 + 1;    j6 = j4 + npq;      %% j5:j6 - V mag of pq buses
+	j7 = j6 + 1;                        %% j7 - lambda
 
-	
-    dDeltaVm_dLambda = zeros(1, 1);
-    dDeltaVm_dVa = zeros(1, npv+npq);
-    dDeltaVm_dVm = zeros(1, npq);
-    %dDeltaVm_dVm(1, find(pq == loadvarloc)) = -1;
-	dDeltaVm_dVm(:) = -participation(pq);
+	Vangles_pv = 1:npv;
+	Vangles_pq = npv+1:npv+npq;
+	Vmag_pq = npv+npq+1:npv+2*npq;
+	lambdaIndex = npv+2*npq + 1;
+	%pv_bus = ~isempty(find(pv == loadvarloc));
 
-    %% form augmented Jacobian
-    J12 = [dDeltaP_dLambda; 
-           dDeltaQ_dLambda];
-    J21 = [dDeltaVm_dVa   dDeltaVm_dVm];
-    J22 = dDeltaVm_dLambda;
-    augJ = [    -J   J12;
-                J21 J22;    ];
+	%% set load as lambda indicates
 
-    %% compute update step
-    dx = -(augJ \ F);
-
-    %% update voltage. 
-    % NOTE: voltage magnitude of pv buses, voltage magnitude
-    % and angle of reference bus are not updated, so they keep as constants
-    % (ie, the value as in the initial guess)
-    if npv
-        Va(pv) = Va(pv) + dx(j1:j2);
-    end
-    if npq
-        Va(pq) = Va(pq) + dx(j3:j4);
-        Vm(pq) = Vm(pq) + dx(j5:j6);
-    end
-    lambda = lambda + dx(j7);
-
-    V = Vm .* exp(j * Va); % NOTE: angle is in radians in pf solver, but in degree in case data
-    Vm = abs(V);            %% update Vm and Va again in case
-    Va = angle(V);          %% we wrapped around with a negative Vm
-
-    %% set load as lambda indicates
 	mP = bus(:,PD) .*(participation == 0) + participation.*lambda.*baseMVA;
 	mQ = mP .* initQPratio;
 
 	bus(:,PD) = mP;
 	bus(:,QD) = mQ;
-%     bus(loadvarloc, PD) = lambda*baseMVA;
-%     bus(loadvarloc, QD) = lambda*baseMVA*initQPratio;
 
-    %% compute complex bus power injections (generation - load)
-    SbusInj = makeSbus(baseMVA, bus, gen);
-    
-    %% evalute F(x)
-    mis = V .* conj(Ybus * V) - SbusInj;
-    mis = -mis;
-%     F = [   real(mis(pv));
-%             real(mis(pq));
-%             imag(mis(pq));
-%             abs(V(loadvarloc)) - Vm_assigned(loadvarloc);   ];
+
+	%% compute complex bus power injections (generation - load)
+	SbusInj = makeSbus(baseMVA, bus, gen);
+
+	%% evalute F(x0)
+	F = Feval(V,Vm_assigned, SbusInj, Ybus, pv, pq, continuationBus);
+
+	
+	
+	
+	%% do Newton iterations
+	while (~converged && i < max_it)
+		%% update iteration counter
+		i = i + 1;
+
+		%% evaluate Jacobian
+		J = getJ(Ybus, V, pv, pq);
+
+		%% evaluate dDeltaP/dLambda, dDeltaQ/dLambda, dDeltaVm/dLambda,
+		%% dDeltaVm/dVa, dDeltaVm/dVm
+	
+		
+		% form K based on participation factors.
+
+
+
+		dDeltaP_dLambda = [-participation(pv); -participation(pq)];
+		dDeltaQ_dLambda = -participation(pq) .* initQPratio(pq);
+
+		dDeltaVm_dLambda = zeros(1, 1);
+		dDeltaVm_dVa = zeros(1, npv+npq);
+		dDeltaVm_dVm = zeros(1, npq);
+		%dDeltaVm_dVm(1, find(pq == loadvarloc)) = -1;
+		dDeltaVm_dVm(:) = -participation(pq);
+
+		%% form augmented Jacobian
+		J12 = [dDeltaP_dLambda; 
+			   dDeltaQ_dLambda];
+		J21 = [dDeltaVm_dVa   dDeltaVm_dVm];
+		J22 = dDeltaVm_dLambda;
+		augJ = [    J   J12;
+					J21 J22;    ];
+
+		%% compute update step
+		dx = -(augJ \ F);
+
+		%% update voltage. 
+		Va(pv) = Va(pv) + dx(Vangles_pv);
+		Va(pq) = Va(pq) + dx(Vangles_pq);
+		Vm(pq) = Vm(pq) + dx(Vmag_pq);
+		lambda = lambda + dx(lambdaIndex);
+			% NOTE: voltage magnitude of pv buses, voltage magnitude
+			% and angle of reference bus are not updated, so they keep as constants
+			% (ie, the value as in the initial guess)
+
+		V = Vm .* exp(j * Va); % NOTE: angle is in radians in pf solver, but in degree in case data
+		Vm = abs(V);            %% update Vm and Va again in case
+		Va = angle(V);          %% we wrapped around with a negative Vm
+
+		%% set load as lambda indicates
+		mP = bus(:,PD) .*(participation == 0) + participation.*lambda.*baseMVA;
+		mQ = mP .* initQPratio;
+
+		bus(:,PD) = mP;
+		bus(:,QD) = mQ;
+	%     bus(loadvarloc, PD) = lambda*baseMVA;
+	%     bus(loadvarloc, QD) = lambda*baseMVA*initQPratio;
+
+		%% compute complex bus power injections (generation - load)
+		SbusInj = makeSbus(baseMVA, bus, gen);
+
+		%% evalute F(x)
+		F = Feval(V,Vm_assigned, SbusInj, Ybus, pv, pq, continuationBus);
+		
+		
+		
+		%% check for convergence
+		normF = norm(F, inf);
+		if verbose > 1
+			fprintf('\niteration [%3d]\t\tnorm of mismatch: %10.3e', i, normF);
+		end
+		if normF < tol
+			converged = 1;
+		end
+	end
+
+	iterNum = i;
+
+	% fprintf('V: '); fprintf('\t%f',V); fprintf('\n');
+
+end
+function F = Feval(V, Vm_assigned, SbusInj, Ybus, pv, pq, continuationBus)
+	
+	%% calculate mismatch
+	mis = SbusInj -  (  V .* conj(Ybus * V)  );
+	
+	%% order mismatches according to formulation
 	F = [   real(mis(pv));
 			real(mis(pq));
 			imag(mis(pq));
 			abs(V(continuationBus)) - Vm_assigned(continuationBus);   ];
-
-    %% check for convergence
-    normF = norm(F, inf);
-    if verbose > 1
-        fprintf('\niteration [%3d]\t\tnorm of mismatch: %10.3e', i, normF);
-    end
-    if normF < tol
-        converged = 1;
-    end
 end
 
-iterNum = i;
+function J = getJ(Ybus, V, pv, pq)
+% J = getJ(Ybus, V, pv, pq)
+%
+% getJ   get jacobian of power flow equations
+%
+%  This function gets the Jaciobian of the power flow equations at 
+	[dSbus_dVm, dSbus_dVa] = dSbus_dV(Ybus, V);
 
-fprintf('V: '); fprintf('\t%f',V); fprintf('\n');
+	j11 = real(dSbus_dVa([pv; pq], [pv; pq]));
+	j12 = real(dSbus_dVm([pv; pq], pq));
+	j21 = imag(dSbus_dVa(pq, [pv; pq]));
+	j22 = imag(dSbus_dVm(pq, pq));
+
+	J = -[   j11 j12;
+			j21 j22;    ];
+	%% form augmented Jacobian
+	%NOTE: the use of '-J' instead of 'J' is due to that the definition of
+	%dP(,dQ) in the textbook is the negative of the definition in MATPOWER. In
+	%the textbook, dP=Pinj-Pbus; In MATPOWER, dP=Pbus-Pinj. Therefore, the
+	%Jacobians generated by the two definitions differ only in the sign.
+end

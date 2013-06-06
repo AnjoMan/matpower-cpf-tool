@@ -1,4 +1,4 @@
-function [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigma, type_predict, initQPratio, loadvarloc, flag_lambdaIncrease)
+function [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigma, type_predict, initQPratio, participation, flag_lambdaIncrease)
 %CPF_PREDICT  Do prediction in cpf.
 %   [INPUT PARAMETERS]
 %   type_predict: 1-predict voltage; 2-predict lambda
@@ -36,101 +36,80 @@ function [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, 
 %   under other licensing terms, the licensors of MATPOWER grant
 %   you additional permission to convey the resulting work.
 
-participation = loadvarloc;
 
-%% set up indexing
-npv = length(pv);
-npq = length(pq);
+	%% set up indexing
+	npv = length(pv);
+	npq = length(pq);
 
-pv_bus = ~isempty(find(pv == loadvarloc));
+	%% form current variable set from given voltage
+	x_current = [ angle(V([pv;pq]));
+				  abs(V(pq));
+				  lambda];
 
-%% form current variable set from given voltage
-x_current = [ angle(V([pv;pq]));
-              abs(V(pq));
-              lambda];
+	%% evaluate Jacobian, dF/d detla  and   dF/dV
+	J = getJ(Ybus, V, pv, pq);
 
-%% evaluate Jacobian
-[dSbus_dVm, dSbus_dVa] = dSbus_dV(Ybus, V);
-
-j11 = real(dSbus_dVa([pv; pq], [pv; pq]));
-j12 = real(dSbus_dVm([pv; pq], pq));
-j21 = imag(dSbus_dVa(pq, [pv; pq]));
-j22 = imag(dSbus_dVm(pq, pq));
-
-J = [   j11 j12;
-        j21 j22;    ];
+	%% form K based on participation factors. dF/d lambda
+	K = [-participation(pv); -participation(pq); -participation(pq) .* initQPratio(pq)];
 
 
-% form K based on participation factors.
-participation = participation ./sum(participation); %normalize
-K = zeros(npv+2*npq,1);
-% 
-% K(pv) = participation(pv);
-% K(npv+pq) = participation(pq);
-% K(npv+npq+pq) = participation(pq).*initQPratio;
-K(1:length(pv)) = participation(pv);
-K(npv + (1:length(pq))) = -participation(pq);
-K(npv+npq+(1:length(pq))) = -participation(pq) .* initQPratio(pq);
+	%% form e  
 
-% %% form K
-% K = zeros(npv+2*npq, 1);
-% if pv_bus % pv bus
-%     K(find(pv == loadvarloc)) = -1;                         % corresponding to deltaP
-% else % pq bus
-%     K(npv + find(pq == loadvarloc)) = -1;                   % corresponding to deltaP
-%     K(npv + npq + find(pq == loadvarloc)) = -initQPratio;   % corresponding to deltaQ
-% end
+	e = zeros(1, npv+2*npq+1);
 
-%% form e
-
-e = zeros(1, npv+2*npq+1);
-if type_predict(1) == 1 % predict voltage
-    if flag_lambdaIncrease == true
-        e(npv+2*npq+1) = 1; % dLambda = 1
-    else
-        e(npv+2*npq+1) = -1; % dLambda = -1
-    end
-elseif type_predict(1) == 2 % predict lambda
-    % [Anton] we have to discriminate between pv and pq bus because in the
-	% original CPF, the changing load was used as the voltage continuation
-	% parameter, so using pv bus would be nonsensical. now we use whichever
-	% bus changes the most, so pv bus must be considered
-	
-	
-	%each bus has an angle, plus all PQ busses have a Voltage
-	continuationBus = type_predict(2);%% [Anton] used type_predict to pass in bus value I want for voltage continuation
-	
-	if any(pq == continuationBus),
-		e(npv + npq + find(pq == continuationBus)) = -1;
-	elseif any(pv==continuationBus),
-		e(find(pv==continuationBus)) = -1;
+	switch type_predict(1),
+		case 1, %predict voltage
+			e(npv+2*npq+1) = -1 + 2*(flag_lambdaIncrease == true);	
+		case 2, %predict lambda
+			%each bus has an angle, plus all PQ busses have a Voltage
+			continuationBus = type_predict(2);%% [Anton] used type_predict to pass in bus value I want for voltage continuation
+			e(npv + npq + find(pq == continuationBus)) = -1;
+			e(pv==continuationBus) = -1;
+		otherwise %error
+			fprintf('Error: unknow ''type_predict''.\n');
 	end
-    %e(npv+npq+find(pq == loadvarloc)) = -1; % dVm = -1
-else
-    fprintf('Error: unknow ''type_predict''.\n');
-    pause
+
+	% form of e is expected to be [ delta * (#pv buses + #pq buses), v* #pq
+	% buses) + 1]
+
+	%% form b
+	b = [zeros(npv+2*npq,1); 1];
+
+	
+	%% reformulated jacobian
+	augJ = [J K ;   
+			 e ];
+			% now includes lambda
+
+	%% calculate predicted variable set
+	x_predicted = x_current + sigma*(augJ\b);
+
+	%% convert variable set to voltage form
+	V_predicted(ref, 1) = V([ref]); %reference bus voltage passes through
+	V_predicted(pv, 1) = abs(V(pv)).* exp(sqrt(-1) * x_predicted(1:npv) ); %apply new angle to 
+	V_predicted(pq, 1) = x_predicted(npv+npq+1:npv+2*npq).* exp(sqrt(-1) * x_predicted(npv+1:npv+npq) );
+	lambda_predicted = x_predicted(npv+2*npq+1);
+
 end
 
-% form of e is expected to be [ delta * (#pv buses + #pq buses), v* #pq
-% buses) + 1]
+function J = getJ(Ybus, V, pv, pq)
+% J = getJ(Ybus, V, pv, pq)
+%
+% getJ   get jacobian of power flow equations
+%
+%  This function gets the Jaciobian of the power flow equations at 
+	[dSbus_dVm, dSbus_dVa] = dSbus_dV(Ybus, V);
 
-%% form b
-b = zeros(npv+2*npq+1, 1);
-b(npv+2*npq+1) = 1;
+	j11 = real(dSbus_dVa([pv; pq], [pv; pq]));
+	j12 = real(dSbus_dVm([pv; pq], pq));
+	j21 = imag(dSbus_dVa(pq, [pv; pq]));
+	j22 = imag(dSbus_dVm(pq, pq));
 
-%% form augmented Jacobian
-%NOTE: the use of '-J' instead of 'J' is due to that the definition of
-%dP(,dQ) in the textbook is the negative of the definition in MATPOWER. In
-%the textbook, dP=Pinj-Pbus; In MATPOWER, dP=Pbus-Pinj. Therefore, the
-%Jacobians generated by the two definitions differ only in the sign.
-augJ = [-J K;   
-        e   ];
-
-%% calculate predicted variable set
-x_predicted = x_current + sigma*(augJ\b);
-
-%% convert variable set to voltage form
-V_predicted([ref], 1) = V([ref]);
-V_predicted([pv], 1) = abs(V([pv])).* exp(sqrt(-1) * x_predicted([1:npv]) );
-V_predicted([pq], 1) = x_predicted([npv+npq+1:npv+2*npq]).* exp(sqrt(-1) * x_predicted([npv+1:npv+npq]) );
-lambda_predicted = x_predicted(npv+2*npq+1);
+	J = -[   j11 j12;
+			j21 j22;    ];
+	%% form augmented Jacobian
+	%NOTE: the use of '-J' instead of 'J' is due to that the definition of
+	%dP(,dQ) in the textbook is the negative of the definition in MATPOWER. In
+	%the textbook, dP=Pinj-Pbus; In MATPOWER, dP=Pbus-Pinj. Therefore, the
+	%Jacobians generated by the two definitions differ only in the sign.
+end
