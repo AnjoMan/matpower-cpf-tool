@@ -81,16 +81,15 @@ if nargin < 2 %no participation factors so keep the current load profile
 	participation = bus(:,PD)./sum(bus(:,PD));
 else
 	
-end
+	participation = participation(:);%(:) forces column vector
 
-participation = participation(:);%(:) forces column vector
-
-if length(participation) ~= numBuses, %improper number of participations given
-	if length(participation) == 1 && participation > 0 && isinteger(participation),%assume bus number is specified instead
-		participation = (1:numBuses)'==participation;
-	else
-		fprintf('\t[Info]\tParticipation Factors improperly specified.\n\t\t\tKeeping Current Loading Profile.\n');
-		participation = bus(:,PD)./sum(bus(:,PD));
+	if length(participation) ~= numBuses, %improper number of participations given
+		if length(participation) == 1 && participation > 0 && isinteger(participation),%assume bus number is specified instead
+			participation = (1:numBuses)'==participation;
+		else
+			fprintf('\t[Info]\tParticipation Factors improperly specified.\n\t\t\tKeeping Current Loading Profile.\n');
+			participation = bus(:,PD)./sum(bus(:,PD));
+		end
 	end
 end
 
@@ -103,8 +102,15 @@ participation_i = participation(e2i(i2e));
 participation_i = participation_i ./ sum(participation_i); %normalize
 
 
+	
+	%could happen if no busses had loads
 %% get bus index lists of each type of bus
 [ref, pv, pq] = bustypes(bus, gen);
+
+if any(isnan(participation_i)),
+	participation_i = zeros(length(participation_i), 1);
+	participation_i(pq) = 1/numel(participation_i(pq));
+end
 
 %% generator info
 on = find(gen(:, GEN_STATUS) > 0);      %% which generators are on?
@@ -159,6 +165,10 @@ Vpr = [];
 lambda_pr = [];
 V_corr = [];
 lambda_corr = [];
+correctionIters = []; 
+
+stepSize = sigmaForLambda;
+minStepSize = 0.01;
 
 while i < max_iter
     %% update iteration counter
@@ -168,19 +178,41 @@ while i < max_iter
     V_saved = V;
     lambda_saved = lambda;
     
-    %% do voltage prediction to find predicted point (predicting voltage)
-    [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigmaForLambda, 1, initQPratio, participation_i, flag_lambdaIncrease);
-    
+	if i<4, 
+		%% do voltage prediction to find predicted point (predicting voltage)
+		[V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
+	else
+		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_corr, lambda, stepSize, ref, pv, pq);
+	end
     %% do voltage correction to find corrected point
     [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 	
 
     %% calculate slope (dP/dLambda) at current point
 	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
-    %slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
-	
-% 	fprintf('slope:\t%f\t| slope full:\t%f\n', (abs(V)-abs(V_saved))./(lambda-lambda_saved));
 
+	
+	if success == false  && stepSize > minStepSize,
+		
+		stepSize = stepSize * 0.3;
+		
+		fprintf('didnt solve; changed stepsize to: %f\n', stepSize);
+% 		success = true;
+		i = i-1;
+		V = V_saved;
+		lambda = lambda_saved;
+		continue;
+	end
+% 	
+	error = abs(V-V_predicted)./abs(V);
+% 	fprintf('%f, ',mean(error));
+	
+% 	if abs(log(mean(error)/0.0001)) > 1,
+% 		stepSize = max(stepSize - 0.1*log( mean(error)/0.0001), minStepSize);
+% 		fprintf('changed stepsize to: %f\n', stepSize);
+% 	end
+	
+	
     %% instead of using condition number as criteria for switching between
     %% modes...
     %%    if rcond(J) <= condNumThresh_Phase1 | success == false % Jacobian matrix is ill-conditioned, or correction step fails
@@ -211,18 +243,27 @@ while i < max_iter
         end
 
         %% record data
-	
-		
         pointCnt = pointCnt + 1;
 		Vpr = [Vpr, V_predicted];
 		lambda_pr = [lambda_pr, lambda_predicted];
 		V_corr = [V_corr, V];
 		lambda_corr = [lambda_corr, lambda];
+		correctionIters = [correctionIters, iterNum];
 		
         predicted_list(:, pointCnt-1) = [V_predicted;lambda_predicted];
         corrected_list(:, pointCnt) = [V;lambda];
+		
+% 		plot(lambda_corr, abs(V_corr(11,:)), 'o-');
+% 		hold on; scatter(lambda_corr, abs(Vpr(11,:)), 'r'); hold off
+		pause(0.01);
     end
 end
+
+		plot(lambda_corr, abs(V_corr(11,:)), 'o-');
+		hold on; scatter(lambda_corr, abs(Vpr(11,:)), 'r'); hold off
+
+% fprintf('Average prediction error for voltage: %f\n', mean(mean( abs( V_corr - Vpr)./abs(V_corr))));
+% fprintf('Avg num of iterations: %f\n', mean(correctionIters));
 pointCnt_Phase1 = pointCnt; % collect number of points obtained at this phase
 if verbose > 0
     fprintf('\t[Info]:\t%d data points contained in phase 1.\n', pointCnt_Phase1);
