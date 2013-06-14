@@ -81,7 +81,8 @@ function [V, lambda, converged, iterNum] = cpf_correctLambda(baseMVA, bus, gen, 
 			%dV/dangle = 0,  dV/dV = participations, dV/dlambda = 0;
 		
 		delVm = zeros(1, npv+npq*2 + 1);
-		delVm(npv+npq+find(pq == continuationBus)) = -1;
+% 		delVm(npv+npq+find(pq == continuationBus)) = -1;
+		delVm(npv+find(pq == continuationBus)) = -1;
 		delVm(pv == continuationBus) = -1;
 		
 		augJ = [ J delF_dLambda;
@@ -90,6 +91,11 @@ function [V, lambda, converged, iterNum] = cpf_correctLambda(baseMVA, bus, gen, 
 		%% compute update step
 		dx = -(augJ \ F);
 
+		if ~isempty(strfind(lastwarn, 'singular')), 
+			lastwarn('No error');
+			break;
+			converged = false;
+		end
 
 		%% update voltage. 
 		Va( [pv;pq] ) = Va( [pv;pq] ) + dx( [Vangles_pv Vangles_pq]);
@@ -114,6 +120,14 @@ function [V, lambda, converged, iterNum] = cpf_correctLambda(baseMVA, bus, gen, 
 	end
 
 	iterNum = i;
+	
+% 	error(lastwarn);
+	
+	if ~isempty(strfind(lastwarn, 'singular')), 
+		lastwarn('No error');
+		converged = false;
+	end
+
 	
 	
 	function [bus, F] = updatePF(bus)

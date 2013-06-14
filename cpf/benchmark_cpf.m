@@ -14,7 +14,7 @@ for iter = 1:repeat,
 	
 	tic;
 	
-	result = cpf(base, -1,10, 0.025);
+	result = cpf(base, -1,2, 0.025);
 	
 	times(iter) = toc;
 	

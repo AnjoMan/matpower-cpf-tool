@@ -1,4 +1,4 @@
-function [V_predicted, lambda_predicted, J, success] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigma, type_predict, initQPratio, participation, flag_lambdaIncrease)
+function [V_predicted, lambda_predicted, J] = cpf_predict2(Ybus, ref, pv, pq, V, lambda, sigma, type_predict, initQPratio, participation, flag_lambdaIncrease)
 %CPF_PREDICT  Do prediction in cpf.
 %   [INPUT PARAMETERS]
 %   type_predict: 1-predict voltage; 2-predict lambda
@@ -97,11 +97,6 @@ function [V_predicted, lambda_predicted, J, success] = cpf_predict(Ybus, ref, pv
 	V_predicted(pv, 1) = abs(V(pv)).* exp(sqrt(-1) * x_predicted(Vangles_pv) ); %apply new angle to 
 	V_predicted(pq, 1) = x_predicted(Vmag_pq).* exp(sqrt(-1) * x_predicted(Vangles_pq) );
 	lambda_predicted = x_predicted(lambdaIndex);
-	
-	if ~isempty(strfind(lastwarn, 'singular')), 
-		lastwarn('No error');
-		success = false;
-	end
 
 end
 
