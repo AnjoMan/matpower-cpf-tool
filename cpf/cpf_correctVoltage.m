@@ -65,7 +65,7 @@ mpopt = mpoption('VERBOSE', 0);
 % fprintf('V: '); fprintf('\t%f',V); fprintf('\n');
 
 if ~isempty(strfind(lastwarn, 'singular')), 
-	keyboard
+% 	keyboard
 	lastwarn('No error');
 	success = false;
 end
