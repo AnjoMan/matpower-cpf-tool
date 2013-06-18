@@ -84,7 +84,7 @@ slopeThresh_Phase2 = 0.3;       % PV curve slope shreshold for lambda prediction
 [baseMVA, bus, gen, branch] = loadcase(casedata);
 [numBuses, ~] = size(bus);
 
-shouldIPlotEverything = false;
+shouldIPlotEverything = true;
 whatBusShouldIPlot = min(size(bus, 1), 11);
 
 if nargin < 2 %no participation factors so keep the current load profile
@@ -179,7 +179,6 @@ lambda_pr = [];
 V_corr = [];
 lambda_corr = [];
 correctionIters = []; 
-slopes = [];
 
 stepSize = sigmaForLambda;
 minStepSize = 0.01;
@@ -206,7 +205,7 @@ while i < max_iter
 
     %% calculate slope (dP/dLambda) at current point
 	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
-	
+
 	
 	if success == false  && stepSize > minStepSize,
 		
@@ -276,9 +275,9 @@ while i < max_iter
         corrected_list(:, pointCnt) = [V;lambda];
 		
 		if shouldIPlotEverything,
-% 			hold on; scatter(lambda, slope); hold off;
-			plot(lambda_corr, abs(V_corr(whatBusShouldIPlot,:)), 'o-');
-			hold on; scatter(lambda_corr, abs(Vpr(whatBusShouldIPlot,:)), 'r'); hold off
+			hold on; scatter(lambda, slope); hold off;
+% 			plot(lambda_corr, abs(V_corr(whatBusShouldIPlot,:)), 'o-');
+% 			hold on; scatter(lambda_corr, abs(Vpr(whatBusShouldIPlot,:)), 'r'); hold off
 			pause(0.01);
 		end
     end
@@ -308,8 +307,6 @@ k = 0;
 correctionIters2 = [];
 predictionErrors2 = [];
 
-startSlope = slope;
-stepSize = sigmaForVoltage;
 while k < max_iter && ~finished
     %% update iteration counter
     k = k + 1;
@@ -320,7 +317,7 @@ while k < max_iter && ~finished
 
     %% do lambda prediction to find predicted point (predicting lambda)
 	
-	[V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, [2, continuationBus], initQPratio, participation_i,flag_lambdaIncrease);
+	[V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, sigmaForVoltage, [2, continuationBus], initQPratio, participation_i,flag_lambdaIncrease);
 
     %% do lambda correction to find corrected point
     Vm_assigned = abs(V_predicted);
@@ -328,28 +325,14 @@ while k < max_iter && ~finished
 	[V, lambda, success, iterNum] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, participation_i, ref, pv, pq, continuationBus);
 	
 	
-	if success == false  && stepSize > minStepSize,	
-		stepSize = stepSize * 0.3;	
-		if verbose, fprintf('\t\tdidnt solve; changed stepsize to: %f\n', stepSize); end
-		i = i-1;
-		V = V_saved;
-		lambda = lambda_saved;
-		continue;
-	end
-	
 	error = mean(abs(V-V_predicted)./abs(V));
 	
 
     %% calculate slope (dP/dLambda) at current point
 	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
-	slopes = [slopes slope];
+
 	
-	proposedStepSize = min( max(stepSize - 0.03*log( mean(error)/0.0001), minStepSize), maxStepSize);
-	
-	stepSize = startSlope/slope^3 * proposedStepSize + (1-startSlope/slope^3) * minStepSize;
-	
-	if slope< 10^-10 || error == 0, 
-		finished = true; break; end
+	if slope< 10^-10 || error == 0, finished = true; break; end
 	
     %% instead of using condition number as criteria for switching between
     %% modes...
@@ -396,7 +379,6 @@ while k < max_iter && ~finished
         corrected_list(:, pointCnt) = [V;lambda];
 		
 		if shouldIPlotEverything,
-% 			hold on; scatter(lambda, slope); hold off;
 			plot(lambda_corr, abs(V_corr(whatBusShouldIPlot,:)), 'o-');
 			hold on; scatter(lambda_corr, abs(Vpr(whatBusShouldIPlot,:)), 'r'); hold off;
 		end
