@@ -48,16 +48,22 @@ function [max_lambda, predicted_list, corrected_list, combined_list, success, et
 %escalate 'singular' to a matrix so we can use error handling to deal with
 %it
 
-[PQ, PV, REF, NONE, BUS_I, BUS_TYPE, PD, QD, GS, BS, BUS_AREA, VM, ...
-    VA, BASE_KV, ZONE, VMAX, VMIN, LAM_P, LAM_Q, MU_VMAX, MU_VMIN] = idx_bus;
+% [PQ, PV, REF, NONE, BUS_I, BUS_TYPE, PD, QD, GS, BS, BUS_AREA, VM, ...
+%     VA, BASE_KV, ZONE, VMAX, VMIN, LAM_P, LAM_Q, MU_VMAX, MU_VMIN] = idx_bus();
+% 
+% [F_BUS, T_BUS, BR_R, BR_X, BR_B, RATE_A, RATE_B, ...
+%     RATE_C, TAP, SHIFT, BR_STATUS, PF, QF, PT, QT, MU_SF, MU_ST] = idx_brch();
+% [GEN_BUS, PG, QG, QMAX, QMIN, VG, MBASE, ...
+%     GEN_STATUS, PMAX, PMIN, MU_PMAX, MU_PMIN, MU_QMAX, MU_QMIN] = idx_gen();
 
-[F_BUS, T_BUS, BR_R, BR_X, BR_B, RATE_A, RATE_B, ...
-    RATE_C, TAP, SHIFT, BR_STATUS, PF, QF, PT, QT, MU_SF, MU_ST] = idx_brch;
-[GEN_BUS, PG, QG, QMAX, QMIN, VG, MBASE, ...
-    GEN_STATUS, PMAX, PMIN, MU_PMAX, MU_PMIN, MU_QMAX, MU_QMIN] = idx_gen;
+BUS_I = 1;
+PD = 3;
+QD = 4;
+VA = 9;
 
-
-
+GEN_BUS = 1;
+VG = 6;
+GEN_STATUS = 8;
 
 
 
@@ -221,11 +227,11 @@ while i < max_iter
 	end
 % 	
 	error = abs(V-V_predicted)./abs(V);
-	try
+% 	try
 		if slope< 10^-10 || nnz(error) == 0, finished = true; break; end
-	catch
-		keyboard
-	end
+% 	catch
+% 		keyboard
+% 	end
 	if mean(error) == 0, break; end
 	
 	if abs(log(mean(error)/0.0001)) > 1 && mean(error)>0,
@@ -327,15 +333,15 @@ while k < max_iter && ~finished
 	
 	[V, lambda, success, iterNum] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, participation_i, ref, pv, pq, continuationBus);
 	
-	
-	if success == false  && stepSize > minStepSize,	
-		stepSize = stepSize * 0.3;	
-		if verbose, fprintf('\t\tdidnt solve; changed stepsize to: %f\n', stepSize); end
-		i = i-1;
-		V = V_saved;
-		lambda = lambda_saved;
-		continue;
-	end
+% 	
+% 	if success == false  && stepSize > minStepSize,	
+% 		stepSize = stepSize * 0.3;	
+% 		if verbose, fprintf('\t\tdidnt solve; changed stepsize to: %f\n', stepSize); end
+% 		i = i-1;
+% 		V = V_saved;
+% 		lambda = lambda_saved;
+% 		continue;
+% 	end
 	
 	error = mean(abs(V-V_predicted)./abs(V));
 	
@@ -343,11 +349,11 @@ while k < max_iter && ~finished
     %% calculate slope (dP/dLambda) at current point
 	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
 	slopes = [slopes slope];
-	
-	proposedStepSize = min( max(stepSize - 0.03*log( mean(error)/0.0001), minStepSize), maxStepSize);
-	
-	stepSize = startSlope/slope^3 * proposedStepSize + (1-startSlope/slope^3) * minStepSize;
-	
+% 	
+% 	proposedStepSize = min( max(stepSize - 0.03*log( mean(error)/0.0001), minStepSize), maxStepSize);
+% 	
+% 	stepSize = startSlope/slope^3 * proposedStepSize + (1-startSlope/slope^3) * minStepSize;
+% 	
 	if slope< 10^-10 || error == 0, 
 		finished = true; break; end
 	
