@@ -56,6 +56,20 @@ function [max_lambda, predicted_list, corrected_list, combined_list, success, et
 % [GEN_BUS, PG, QG, QMAX, QMIN, VG, MBASE, ...
 %     GEN_STATUS, PMAX, PMIN, MU_PMAX, MU_PMIN, MU_QMAX, MU_QMIN] = idx_gen();
 
+if nargin == 0 % run test suite
+    mfilename
+%     which('cpf.m')
+    [path, name, ext] = fileparts(which(sprintf('%s.m',mfilename)))
+    runFile = fullfile(path, 'test', sprintf('test_%s.m', name))
+    run(runFile)
+%     pwd
+    
+%     fullfile(path , 'test', 'test_cpf.m')
+%     run(fullfile('test', 'test_cpf.m'));
+    
+    return;
+end
+
 BUS_I = 1;
 PD = 3;
 QD = 4;
@@ -77,7 +91,7 @@ end
 if nargin < 5, verbose = 0; end
 
 
-
+mError = MException('CPF:cpf', 'cpf_error');
 %% options
 max_iter = 1000;                 % depends on selection of stepsizes
 
@@ -87,14 +101,16 @@ slopeThresh_Phase2 = 0.3;       % PV curve slope shreshold for lambda prediction
 
 
 %% load the case & convert to internal bus numbering
-[baseMVA, bus, gen, branch] = loadcase(casedata);
-[numBuses, ~] = size(bus);
+[baseMVA, busE, genE, branchE] = loadcase(casedata);
+[numBuses, ~] = size(busE);
 
 shouldIPlotEverything = false;
-whatBusShouldIPlot = min(size(bus, 1), 11);
+whatBusShouldIPlot = min(size(busE, 1), 11);
+
+shouldIPlotEverything = true;
 
 if nargin < 2 %no participation factors so keep the current load profile
-	participation = bus(:,PD)./sum(bus(:,PD));
+	participation = busE(:,PD)./sum(busE(:,PD));
 else
 	
 	participation = participation(:);%(:) forces column vector
@@ -104,15 +120,14 @@ else
 			participation = (1:numBuses)'==participation;
 		else
 			if verbose, fprintf('\t[Info]\tParticipation Factors improperly specified.\n\t\t\tKeeping Current Loading Profile.\n'); end
-			participation = bus(:,PD)./sum(bus(:,PD));
+			participation = busE(:,PD)./sum(busE(:,PD));
 		end
 	end
 end
 
-[i2e, bus, gen, branch] = ext2int(bus, gen, branch);
+[i2e, bus, gen, branch] = ext2int(busE, genE, branchE);
 e2i = sparse(max(i2e), 1);
 e2i(i2e) = (1:size(bus, 1))';
-%loadvarloc_i = e2i(loadvarloc);
 participation_i = participation(e2i(i2e));
 
 participation_i = participation_i ./ sum(participation_i); %normalize
@@ -135,8 +150,11 @@ on = find(gen(:, GEN_STATUS) > 0);      %% which generators are on?
 gbus = gen(on, GEN_BUS);                %% what buses are they at?
 
 %% form Ybus matrix
-[Ybus, ~, ~] = makeYbus(baseMVA, bus, branch);
 
+[Ybus, ~, ~] = makeYbus(baseMVA, bus, branch);
+if det(Ybus) == 0
+    addCause(mError, MException('MATPOWER:makeYBus', 'Ybus is singular'));
+end
 
 %% initialize parameters
 % set lambda to be increasing
@@ -150,7 +168,7 @@ if any(isnan(initQPratio)),
 end
 
 
-lambda0 = 2; 
+lambda0 = 1; %changed from 2 -> 0 
 lambda = lambda0;
 Vm = ones(size(bus, 1), 1);          %% flat start
 Va = bus(ref(1), VA) * Vm;
@@ -164,6 +182,14 @@ lambda_predicted = lambda;
 V_predicted = V;
 [V, lambda, success, ~] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 %% record data
+if any(isnan(V))
+    err = MException('CPF:correctVoltageError', 'Generating initial voltage profile');
+    errCause = MException('CPF:correctVoltageError', ['NaN bus voltage at ', mat2str(i2e(isnan(V)))]);
+    err = addCause(err,errCause);
+    
+    throw(err);
+end
+
 pointCnt = pointCnt + 1;
 
 
@@ -188,6 +214,9 @@ correctionIters = [];
 slopes = [];
 
 stepSize = sigmaForLambda;
+% stepSize = 1
+
+%parametrize step size for Phase 1
 minStepSize = 0.01;
 maxStepSize = 10;
 finished = false;
@@ -205,7 +234,25 @@ while i < max_iter
 		[V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
 	else
 		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_corr, lambda, stepSize, ref, pv, pq);
-	end
+    end
+    error_predicted = max(abs(V_predicted- V));
+    
+    
+    %% check prediction to make sure step is not too big so as to cause non-convergence
+    if ~success && error_predicted > 0.1
+        newStepSize = 0.8*stepSize; %cut down the step size to reduce the prediction error
+%         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
+        if newStepSize > minStepSize,
+            if verbose, fprintf('\t\tpredicted voltage change: %.2f. Step Size reduced from %.3f to %.3f\n', error_predicted, stepSize, newStepSize); end
+            stepSize = newStepSize;
+            i = i-1;
+            
+            continue
+        end
+        
+    end
+%     slope = max(abs(V_predicted-V) ./ (lambda_predicted - lambda))
+
     %% do voltage correction to find corrected point
     [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 	
@@ -213,58 +260,36 @@ while i < max_iter
     %% calculate slope (dP/dLambda) at current point
 	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
 	
-	
-	if success == false  && stepSize > minStepSize,
-		
-		stepSize = stepSize * 0.3;
-		
+	if success == false  && stepSize > minStepSize,		
+		stepSize = stepSize * 0.3;		
 		if verbose, fprintf('\t\tdidnt solve; changed stepsize to: %f\n', stepSize); end
 % 		success = true;
 		i = i-1;
 		V = V_saved;
 		lambda = lambda_saved;
 		continue;
-	end
-% 	
+    end
+
+    
+    
+    
+    
 	error = abs(V-V_predicted)./abs(V);
-% 	try
-		if slope< 10^-10 || nnz(error) == 0, finished = true; break; end
-% 	catch
-% 		keyboard
-% 	end
-	if mean(error) == 0, break; end
+	if slope< 10^-10 || nnz(error) == 0, finished = true; break; end
+   
+	if mean(error) == 0, break; end %dubious
 	
 	if abs(log(mean(error)/0.0001)) > 1 && mean(error)>0,
-		stepSize = max(stepSize - 0.1*log( mean(error)/0.0001), minStepSize);
-		stepSize = min(stepSize, maxStepSize);
-		if verbose, fprintf('\t\tchanged stepsize to: %f\n', stepSize); end
+        newStepSize = stepSize - 0.1*log(mean(error)/0.0001); %adjust step size
+        newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
+        
+		if verbose, fprintf('\t\tmean prediction error: %f. changed stepsize from %.2f to %.2f\n', mean(error), stepSize, newStepSize); end
+        stepSize = newStepSize;
 	end
 	
-	
-    %% instead of using condition number as criteria for switching between
-    %% modes...
-    %%    if rcond(J) <= condNumThresh_Phase1 | success == false % Jacobian matrix is ill-conditioned, or correction step fails
-    %% ...we use PV curve slopes as the criteria for switching modes
-    if abs(slope) >= slopeThresh_Phase1 || success == false % Approaching nose area of PV curve, or correction step fails
-        % restore good data
-        V = V_saved;
-        lambda = lambda_saved;
-        
-		if verbose > 0
-			if ~success, 
-				if ~isempty(strfind(lastwarn, 'singular')), 
-					fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n'); 
-					lastwarn('No error');
-					break;
-				else
-					fprintf('\t[Info]:\tLambda correction fails.\n'); 
-				end
-			else
-				fprintf('\t[Info]:\tApproaching nose area of PV curve.\n');
-			end
-		end
-        break;
-    else
+
+    
+    if success % if correction converged we can save the point and do plotting/output in verbose mode
         if verbose > 2
             fprintf('\nVm_predicted\tVm_corrected\n');
             [[abs(V_predicted);lambda_predicted] [abs(V);lambda]]
@@ -283,10 +308,40 @@ while i < max_iter
 		
 		if shouldIPlotEverything,
 % 			hold on; scatter(lambda, slope); hold off;
-			plot(lambda_corr, abs(V_corr(whatBusShouldIPlot,:)), 'o-');
+			plot(lambda_corr, abs(V_corr(whatBusShouldIPlot,:)), '.-', 'markers', 10);
 			hold on; scatter(lambda_corr, abs(Vpr(whatBusShouldIPlot,:)), 'r'); hold off
 			pause(0.01);
 		end
+    end
+    
+    
+    	
+    % instead of using condition number as criteria for switching between
+    % modes...
+    %    if rcond(J) <= condNumThresh_Phase1 | success == false % Jacobian matrix is ill-conditioned, or correction step fails
+    % ...we use PV curve slopes as the criteria for switching modes:    
+    if abs(slope) >= slopeThresh_Phase1 || success == false % Approaching nose area of PV curve, or correction step fails
+        
+        % restore good data point if convergence failed
+        if success == false
+            V = V_saved;
+            lambda = lambda_saved;
+        end 
+
+		if verbose > 0
+			if ~success, 
+				if ~isempty(strfind(lastwarn, 'singular')), 
+					fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n'); 
+					lastwarn('No error');
+					break;
+				else
+					fprintf('\t[Info]:\tLambda correction fails.\n'); 
+				end
+			else
+				fprintf('\t[Info]:\tApproaching nose area of PV curve.\n');
+			end
+		end
+        break;    
     end
 end
 
@@ -314,6 +369,11 @@ k = 0;
 correctionIters2 = [];
 predictionErrors2 = [];
 
+
+maxStepSize = 0.1;
+minStepSize = 0.0001;
+% maxStepSize_voltage = 0.1;
+% minStepSize_voltage = 0.0001;
 startSlope = slope;
 stepSize = sigmaForVoltage;
 while k < max_iter && ~finished
@@ -323,16 +383,54 @@ while k < max_iter && ~finished
     % save good data
     V_saved = V;
     lambda_saved = lambda;
-
+    
+%     if k >= 4, keyboard; end
+    
     %% do lambda prediction to find predicted point (predicting lambda)
-	
-	[V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, [2, continuationBus], initQPratio, participation_i,flag_lambdaIncrease);
-
+	if k<4
+        [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, [2, continuationBus], initQPratio, participation_i,flag_lambdaIncrease);
+    else
+        [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr, lambda_corr, lambda, stepSize, continuationBus, ref, pv, pq);
+    end
+   
+    
+    
     %% do lambda correction to find corrected point
     Vm_assigned = abs(V_predicted);
+    
+  
 	
 	[V, lambda, success, iterNum] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, participation_i, ref, pv, pq, continuationBus);
 	
+%     if lambda > 1.79,keyboard; end
+    mean_step = mean( abs(V_predicted-V_saved));    
+	prediction_error = mean(abs(V-V_predicted)./abs(V));
+    error_order = log(prediction_error/0.000001);
+    
+    if ( mean_step > 0.00001 && ~success) % if we jumped too far and correction step didn't converge
+        newStepSize = stepSize * 0.8;
+        if newStepSize > minStepSize, %if we are not below min step-size threshold go back and try again with new stepSize
+            if verbose, fprintf('\t\tpredicted voltage change: %f. Step Size reduced from %.5f to %.5f\n', mean_step, stepSize, newStepSize); end
+            stepSize = newStepSize;
+            V = V_saved;
+            lambda= lambda_saved;
+            k =  k-1;
+            continue;
+        end
+
+    elseif abs(error_order) > 2 && prediction_error>0, %if we havent just dropped the stepSize, consider changing it to get a better error outcome
+%         newStepSize = stepSize - 0.1*log(prediction_error/0.000001); %adjust step size
+        newStepSize = stepSize * 1.1;
+        newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
+        
+		if verbose, fprintf('\t\tmean prediction error: %f. changed stepsize from %.5f to %.5f\n', mean(error), stepSize, newStepSize); end
+        stepSize = newStepSize;
+	end
+	
+    
+    
+%     if stepSize < 0.0011, keyboard;  end
+%     if slope < 0, keyboard; end
 % 	
 % 	if success == false  && stepSize > minStepSize,	
 % 		stepSize = stepSize * 0.3;	
@@ -343,45 +441,34 @@ while k < max_iter && ~finished
 % 		continue;
 % 	end
 	
-	error = mean(abs(V-V_predicted)./abs(V));
+	prediction_error = mean(abs(V-V_predicted)./abs(V));
 	
 
     %% calculate slope (dP/dLambda) at current point
-	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
-	slopes = [slopes slope];
+    mSlopes = abs(V-V_saved)./(lambda-lambda_saved);
+    
+    
+%     mSlopes = mSlopes(pq); 
+    [~,continuationBusPQ] = max(abs(mSlopes(pq))); %limit to only PQ busses
+    continuationBus = pq(continuationBusPQ);
+    slope = mSlopes(continuationBus);
+    
+    if shouldIPlotEverything,
+% 			hold on; scatter(lambda, slope); hold off;
+        plot(lambda_corr, abs(V_corr(continuationBus,:)), '.-');
+        hold on; scatter(lambda_corr, abs(Vpr(continuationBus,:)), 'r'); hold off;
+    end
+	slopes = [slopes slope];%log the slope
 % 	
-% 	proposedStepSize = min( max(stepSize - 0.03*log( mean(error)/0.0001), minStepSize), maxStepSize);
+% 	proposedStepSize = min( max(stepSize - 0.03*log( mean(prediction_error)/0.0001), minStepSize), maxStepSize);
 % 	
 % 	stepSize = startSlope/slope^3 * proposedStepSize + (1-startSlope/slope^3) * minStepSize;
 % 	
-	if slope< 10^-10 || error == 0, 
-		finished = true; break; end
+% 	if slope< 10^-10 || prediction_error == 0, 
+% 		finished = true; break; end
 	
-    %% instead of using condition number as criteria for switching between
-    %% modes...
-    %%    if rcond(J) >= condNumThresh_Phase2 | success == false % Jacobian matrix is good-conditioned, or correction step fails
-    %% ...we use PV curve slopes as the criteria for switching modes
-    if abs(slope) <= slopeThresh_Phase2 || success == false % Leaving nose area of PV curve, or correction step fails
-        % restore good data
-        V = V_saved;
-        lambda = lambda_saved;
-
-        %% ---change to voltage prediction-correction (lambda decreasing)
-        if verbose > 0
-			if ~success, 
-				if ~isempty(strfind(lastwarn, 'singular'))
-					fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n');
-					lastwarn('No error');
-					break;
-				else
-					fprintf('\t[Info]:\tLambda correction fails.\n');
-				end
-			else
-				fprintf('\t[Info]:\tLeaving nose area of PV curve.\n');
-			end
-        end
-        break;
-    else
+    
+    if success %if correction step converged, log values and do verbosity
         if verbose > 2
             fprintf('\nVm_predicted\tVm_corrected\n');
             [[abs(V_predicted);lambda_predicted] [abs(V);lambda]]
@@ -403,10 +490,44 @@ while k < max_iter && ~finished
 		
 		if shouldIPlotEverything,
 % 			hold on; scatter(lambda, slope); hold off;
-			plot(lambda_corr, abs(V_corr(whatBusShouldIPlot,:)), 'o-');
-			hold on; scatter(lambda_corr, abs(Vpr(whatBusShouldIPlot,:)), 'r'); hold off;
+			plot(lambda_corr, abs(V_corr(continuationBus,:)), '.-', 'markers', 12);
+			hold on; scatter(lambda_corr, abs(Vpr(continuationBus,:)), 'r'); hold off;
 		end
     end
+    
+    
+    
+    %% instead of using condition number as criteria for switching between
+    %% modes...
+    %%    if rcond(J) >= condNumThresh_Phase2 | success == false % Jacobian matrix is good-conditioned, or correction step fails
+    %% ...we use PV curve slopes as the criteria for switching modes:
+%     if slope < 0 && slope > -slopeThresh_Phase2   keyboard;   end
+%     if abs(slope) <= slopeThresh_Phase2 || success == false % Leaving nose area of PV curve, or correction step fails
+
+    if ~success || (slope < 0 && slope > -slopeThresh_Phase2),
+
+        % restore good data
+        V = V_saved;
+        lambda = lambda_saved;
+
+        %% ---change to voltage prediction-correction (lambda decreasing)
+        if verbose > 0
+			if ~success, 
+				if ~isempty(strfind(lastwarn, 'singular'))
+					fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n');
+					lastwarn('No error');
+					break;
+				else
+					fprintf('\t[Info]:\tLambda correction fails.\n');
+				end
+			else
+				fprintf('\t[Info]:\tLeaving nose area of PV curve.\n');
+			end
+        end
+        break;   
+    end
+    
+%     if verbose, fprintf('lambda: %.3f,     slope: %.4f     error: %e    error_order: %f     stepSize: %.15f\n', lambda, slope, prediction_error, error_order,stepSize); end
 end
 
 
@@ -436,10 +557,12 @@ end
 flag_lambdaIncrease = false; 
 i = 0;
 
-
+%set step size for Phase 3
+minStepSize = 0.01;
+maxStepSize = 10;
 
 while i < max_iter && ~finished
-	break;
+% 	break;
     %% update iteration counter
     i = i + 1;
     
@@ -453,9 +576,20 @@ while i < max_iter && ~finished
 	slope = min( abs( V-V_saved)./(lambda-lambda_saved));
 	
 	
-	if slope< 10^-10 || error == 0, finished = true; break; end
+% 	if slope< 10^-10 || error == 0, 
+%         finished = true; break; end
 %     slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
 
+    mean_error = mean( abs( V-V_predicted));
+    error_order = log(mean_error/0.000001);
+    if abs(error_order) > 1 && mean(error)>0,
+        newStepSize = stepSize *1.4
+        newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
+        
+		if verbose, fprintf('\t\tmean prediction error: %f. changed stepsize from %.5f to %.5f\n', mean(error), stepSize, newStepSize); end
+        stepSize = newStepSize;
+    end
+    
     if lambda < 0 % lambda is less than 0, then stops CPF simulation
         if verbose > 0
             fprintf('\t[Info]:\tlambda is less than 0.\n\t\t\tCPF finished.\n');
@@ -467,19 +601,8 @@ while i < max_iter && ~finished
     %% modes...
     %%    if rcond(J) <= condNumThresh_Phase3 | success == false % Jacobian matrix is ill-conditioned, or correction step fails
     %% ...we use PV curve slopes as the criteria for switching modes
-    if success == false % voltage correction step fails.
-		
-        if verbose > 0
-			if ~isempty(strfind(lastwarn, 'singular'))
-				fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n');
-				lastwarn('No error');
-				break;
-			else
-				fprintf('\t[Info]:\tVoltage correction step fails..\n');
-			end
-        end
-        break;
-    else
+    
+    if success
         if verbose > 2
             fprintf('\nVm_predicted\tVm_corrected\n');
             [[abs(V_predicted);lambda_predicted] [abs(V);lambda]]
@@ -497,9 +620,25 @@ while i < max_iter && ~finished
         corrected_list(:, pointCnt) = [V;lambda];
 		
 		if shouldIPlotEverything,
-			plot(lambda_corr, abs(V_corr(whatBusShouldIPlot,:)), 'o-');
-			hold on; scatter(lambda_corr, abs(Vpr(whatBusShouldIPlot,:)), 'r'); hold off
+			plot(lambda_corr, abs(V_corr(continuationBus,:)), '.-', 'markers', 12);
+			hold on; scatter(lambda_corr, abs(Vpr(continuationBus,:)), 'r'); hold off
 		end
+        
+    end
+    
+    
+    if success == false % voltage correction step fails.
+		
+        if verbose > 0
+			if ~isempty(strfind(lastwarn, 'singular'))
+				fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n');
+				lastwarn('No error');
+				break;
+			else
+				fprintf('\t[Info]:\tVoltage correction step fails..\n');
+			end
+        end
+        break;        
     end
 end
 
@@ -521,7 +660,7 @@ if  ~exist('corrected_list','var') | ~exist('predicted_list','var'),
 	predicted_list = [];
 	corrected_list = [];
 	combined_list = [];
-	success==false;
+	success=false;
 end
 
 if ~exist('max_lambda', 'var'),

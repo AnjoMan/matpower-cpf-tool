@@ -69,3 +69,11 @@ if ~isempty(strfind(lastwarn, 'singular')),
 	lastwarn('No error');
 	success = false;
 end
+
+% if any(isnan(V))
+%     err = MException('CPF:correctVoltage', 'Generating initial voltage profile');
+%     errCause = MException('CPF:correctVoltage', ['Bus ', mat2str(i2e(find(isnan(V)))), ' have NaN voltage']);
+%     err = addCause(err,errCause);
+%     
+%     throw(err);
+% end
