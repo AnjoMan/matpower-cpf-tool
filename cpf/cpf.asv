@@ -448,7 +448,6 @@ while k < max_iter && ~finished
     mSlopes = abs(V-V_saved)./(lambda-lambda_saved);
     
     
-    fprintf('abs slope: %10f\n', mean( (abs(V) - abs(V_saved))/(lambda-lambda_save))
 %     mSlopes = mSlopes(pq); 
     [~,continuationBusPQ] = max(abs(mSlopes(pq))); %limit to only PQ busses
     continuationBus = pq(continuationBusPQ);
@@ -502,9 +501,11 @@ while k < max_iter && ~finished
     %% modes...
     %%    if rcond(J) >= condNumThresh_Phase2 | success == false % Jacobian matrix is good-conditioned, or correction step fails
     %% ...we use PV curve slopes as the criteria for switching modes:
-    if abs(slope) >= -slopeThresh_Phase2   keyboard;   end
+%     if slope < 0 && slope > -slopeThresh_Phase2   keyboard;   end
 %     if abs(slope) <= slopeThresh_Phase2 || success == false % Leaving nose area of PV curve, or correction step fails
-    if ~success
+
+    if ~success || (slope < 0 && slope > -slopeThresh_Phase2),
+
         % restore good data
         V = V_saved;
         lambda = lambda_saved;
@@ -526,7 +527,7 @@ while k < max_iter && ~finished
         break;   
     end
     
-    if verbose, fprintf('lambda: %.3f,     slope: %.4f     error: %e    error_order: %f     stepSize: %.15f\n', lambda, slope, prediction_error, error_order,stepSize); end
+%     if verbose, fprintf('lambda: %.3f,     slope: %.4f     error: %e    error_order: %f     stepSize: %.15f\n', lambda, slope, prediction_error, error_order,stepSize); end
 end
 
 
@@ -575,9 +576,22 @@ while i < max_iter && ~finished
 	slope = min( abs( V-V_saved)./(lambda-lambda_saved));
 	
 	
-	if slope< 10^-10 || error == 0, finished = true; break; end
+% 	if slope< 10^-10 || error == 0, 
+%         finished = true; break; end
 %     slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
 
+    mean_error = mean( abs( V-V_predicted));
+    error_order = log(mean_error/0.0001);
+    
+    fprintf('error order: %f\n', error_order);
+    if abs(error_order) > 1 && mean(error)>0,
+        newStepSize = stepSize * (1 + 0.4*(error_order < 0) - (0.4*error_order>0));
+        newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
+        
+		if verbose, fprintf('\t\tmean prediction error: %f. changed stepsize from %.5f to %.5f\n', mean(error), stepSize, newStepSize); end
+        stepSize = newStepSize;
+    end
+   
     if lambda < 0 % lambda is less than 0, then stops CPF simulation
         if verbose > 0
             fprintf('\t[Info]:\tlambda is less than 0.\n\t\t\tCPF finished.\n');
@@ -589,19 +603,8 @@ while i < max_iter && ~finished
     %% modes...
     %%    if rcond(J) <= condNumThresh_Phase3 | success == false % Jacobian matrix is ill-conditioned, or correction step fails
     %% ...we use PV curve slopes as the criteria for switching modes
-    if success == false % voltage correction step fails.
-		
-        if verbose > 0
-			if ~isempty(strfind(lastwarn, 'singular'))
-				fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n');
-				lastwarn('No error');
-				break;
-			else
-				fprintf('\t[Info]:\tVoltage correction step fails..\n');
-			end
-        end
-        break;
-    else
+    
+    if success
         if verbose > 2
             fprintf('\nVm_predicted\tVm_corrected\n');
             [[abs(V_predicted);lambda_predicted] [abs(V);lambda]]
@@ -619,9 +622,25 @@ while i < max_iter && ~finished
         corrected_list(:, pointCnt) = [V;lambda];
 		
 		if shouldIPlotEverything,
-			plot(lambda_corr, abs(V_corr(whatBusShouldIPlot,:)), 'o-');
-			hold on; scatter(lambda_corr, abs(Vpr(whatBusShouldIPlot,:)), 'r'); hold off
+			plot(lambda_corr, abs(V_corr(continuationBus,:)), '.-', 'markers', 12);
+			hold on; scatter(lambda_corr, abs(Vpr(continuationBus,:)), 'r'); hold off
 		end
+        
+    end
+    
+    
+    if success == false % voltage correction step fails.
+		
+        if verbose > 0
+			if ~isempty(strfind(lastwarn, 'singular'))
+				fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n');
+				lastwarn('No error');
+				break;
+			else
+				fprintf('\t[Info]:\tVoltage correction step fails..\n');
+			end
+        end
+        break;        
     end
 end
 

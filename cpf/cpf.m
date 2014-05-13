@@ -581,15 +581,17 @@ while i < max_iter && ~finished
 %     slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
 
     mean_error = mean( abs( V-V_predicted));
-    error_order = log(mean_error/0.000001);
+    error_order = log(mean_error/0.001);
+    
+    fprintf('error order: %f\n', error_order);
     if abs(error_order) > 1 && mean(error)>0,
-        newStepSize = stepSize *1.4
+        newStepSize = stepSize * (1 + 0.4*(error_order < 0) - (0.4*error_order>0));
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         
 		if verbose, fprintf('\t\tmean prediction error: %f. changed stepsize from %.5f to %.5f\n', mean(error), stepSize, newStepSize); end
         stepSize = newStepSize;
     end
-    
+   
     if lambda < 0 % lambda is less than 0, then stops CPF simulation
         if verbose > 0
             fprintf('\t[Info]:\tlambda is less than 0.\n\t\t\tCPF finished.\n');
