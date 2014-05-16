@@ -238,7 +238,7 @@ maxStepSize = 2;
 stepSize = min(max(sigmaForLambda, minStepSize),maxStepSize);
 
 finished = false;
-
+continuationBus = pq(1);
 
 i = 0; j=0; k=0; %initialize counters for each phase to zero
 while i < max_iter
@@ -278,27 +278,24 @@ while i < max_iter
 	
 
     %% calculate slope (dP/dLambda) at current point
-	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
-	
-	if success == false  && stepSize > minStepSize,		
-		stepSize = stepSize * 0.3;		
-		if verbose, fprintf('\t\tdidnt solve; changed stepsize to: %f\n', stepSize); end
-% 		success = true;
-		i = i-1;
-		V = V_saved;
-		lambda = lambda_saved;
-		continue;
-    end
+	[slope, ~] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
+% 	
+% 	if success == false  && stepSize > minStepSize,		
+% 		stepSize = stepSize * 0.3;		
+% 		if verbose, fprintf('\t\tdidnt solve; changed stepsize to: %f\n', stepSize); end
+% % 		success = true;
+% 		i = i-1;
+% 		V = V_saved;
+% 		lambda = lambda_saved;
+% 		continue;
+%     end
 
     
     
     
     
 	error = abs(V-V_predicted)./abs(V);
-	if slope< 10^-10 || nnz(error) == 0, finished = true; break; end
-   
-	if mean(error) == 0, break; end %dubious
-	
+    
 	if abs(log(mean(error)/0.0001)) > 1 && mean(error)>0,
         newStepSize = stepSize - 0.1*log(mean(error)/0.0001); %adjust step size
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
@@ -316,24 +313,8 @@ while i < max_iter
         end
 
         %% record data
+        logStepResults()
         pointCnt = pointCnt + 1;
-		Vpr = [Vpr, V_predicted];
-		lambda_pr = [lambda_pr, lambda_predicted];
-		V_corr = [V_corr, V];
-		lambda_corr = [lambda_corr, lambda];
-		correctionIters = [correctionIters, iterNum];
-		
-        predicted_list(:, pointCnt-1) = [V_predicted;lambda_predicted];
-        corrected_list(:, pointCnt) = [V;lambda];
-		
-		if shouldIPlotEverything,
-% 			hold on; scatter(lambda, slope); hold off;
-            
-% 			plot(lambda_corr, abs(V_corr(whatBusShouldIPlot,:)), '.-', 'markers', 10);
-% 			hold on; scatter(lambda_corr, abs(Vpr(whatBusShouldIPlot,:)), 'r'); hold off
-% 			pause(0.01);
-            plotBus
-		end
     end
     
     
@@ -440,6 +421,8 @@ while j < max_iter && ~finished
 
     elseif abs(error_order) > 2 && prediction_error>0, %if we havent just dropped the stepSize, consider changing it to get a better error outcome
 %         newStepSize = stepSize - 0.1*log(prediction_error/0.000001); %adjust step size
+% 	proposedStepSize = min( max(stepSize - 0.03*log( mean(prediction_error)/0.0001), minStepSize), maxStepSize);
+
         newStepSize = stepSize * 1.1;
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         
@@ -447,43 +430,17 @@ while j < max_iter && ~finished
         stepSize = newStepSize;
 	end
 	
-    
-    
-% 	
-% 	if success == false  && stepSize > minStepSize,	
-% 		stepSize = stepSize * 0.3;	
-% 		if verbose, fprintf('\t\tdidnt solve; changed stepsize to: %f\n', stepSize); end
-% 		i = i-1;
-% 		V = V_saved;
-% 		lambda = lambda_saved;
-% 		continue;
-% 	end
 	
 	prediction_error = mean(abs(V-V_predicted)./abs(V));
 	
 
     %% calculate slope (dP/dLambda) at current point
     mSlopes = abs(V-V_saved)./(lambda-lambda_saved);
-%     mSlopes = abs( (abs(V)-abs(V_saved))./(lambda-lambda_saved));
-    
-    
-%     mSlopes = mSlopes(pq); 
     [~,continuationBusPQ] = max(abs(mSlopes(pq))); %limit to only PQ busses
     continuationBus = pq(continuationBusPQ);
     slope = mSlopes(continuationBus);
-    
-%     if shouldIPlotEverything,
-%         plotBusCurve(continuationBus);
-%     end
 	slopes = [slopes slope];%log the slope
-% 	
-% 	proposedStepSize = min( max(stepSize - 0.03*log( mean(prediction_error)/0.0001), minStepSize), maxStepSize);
-% 	
-% 	stepSize = startSlope/slope^3 * proposedStepSize + (1-startSlope/slope^3) * minStepSize;
-% 	
-% 	if slope< 10^-10 || prediction_error == 0, 
-% 		finished = true; break; end
-	
+
     
     if success %if correction step converged, log values and do verbosity
         if verbose > 2
@@ -492,21 +449,7 @@ while j < max_iter && ~finished
         end
 
         %% record data
-%         pointCnt = pointCnt + 1;
-		
-		Vpr = [Vpr, V_predicted];
-		lambda_pr = [lambda_pr, lambda_predicted];
-		V_corr = [V_corr, V];
-		lambda_corr = [lambda_corr, lambda];
-		
-		correctionIters2 = [correctionIters2 iterNum];
-		predictionErrors2 = [predictionErrors2 error];
-		
-        predicted_list(:, pointCnt-1) = [V_predicted;lambda_predicted];
-        corrected_list(:, pointCnt) = [V;lambda];
-		
-		if shouldIPlotEverything, plotBusCurve(continuationBus); end
-        
+		logStepResults()
         pointCnt = pointCnt + 1;
     end
     
@@ -579,6 +522,8 @@ while k < max_iter && ~finished
     %% update iteration counter
     k = k + 1;
     
+    
+    %% store V and lambda
     V_saved = V;
     lambda_saved = lambda;
     
@@ -591,10 +536,6 @@ while k < max_iter && ~finished
     %% calculate slope (dP/dLambda) at current point
 	slope = min( abs( V-V_saved)./(lambda-lambda_saved));
 	
-	
-% 	if slope< 10^-10 || error == 0, 
-%         finished = true; break; end
-%     slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
 
     mean_error = mean( abs( V-V_predicted));
     error_order = log(mean_error/0.001);
@@ -626,24 +567,15 @@ while k < max_iter && ~finished
         end
 
         %% record data
-		
-		Vpr = [Vpr, V_predicted];
-		lambda_pr = [lambda_pr, lambda_predicted];
-		V_corr = [V_corr, V];
-		lambda_corr = [lambda_corr, lambda];
-		
-        predicted_list(:, pointCnt-1) = [V_predicted;lambda_predicted];
-        corrected_list(:, pointCnt) = [V;lambda];
-		
-		if shouldIPlotEverything, plotBusCurve(continuationBus); end
-        
+		logStepResults()
         pointCnt = pointCnt + 1;
         
     end
     
     
     if success == false % voltage correction step fails.
-		
+		V = V_saved;
+        lambda = lambda_saved;
         if verbose > 0
 			if ~isempty(strfind(lastwarn, 'singular'))
 				fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n');
@@ -659,9 +591,9 @@ end
 
 
 if success, %assuming we didn't fail out, try to solve for lambda = 0
-    [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda_saved, lambda_saved, 1, initQPratio, participation_i, flag_lambdaIncrease);
+    [V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda_saved, lambda_saved, 1, initQPratio, participation_i, flag_lambdaIncrease);
     
-    [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
+    [V, lambda, success, ~] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
     
     if success
         if verbose > 2
@@ -671,18 +603,7 @@ if success, %assuming we didn't fail out, try to solve for lambda = 0
 
         %% record data
         pointCnt = pointCnt + 1;
-		
-		Vpr = [Vpr, V_predicted];
-		lambda_pr = [lambda_pr, lambda_predicted];
-		V_corr = [V_corr, V];
-		lambda_corr = [lambda_corr, lambda];
-		
-        predicted_list(:, pointCnt-1) = [V_predicted;lambda_predicted];
-        corrected_list(:, pointCnt) = [V;lambda];
-		
-		if shouldIPlotEverything,  plotBusCurve(continuationBus); end
-        
-        
+		logStepResults()
     end
 end
 
@@ -770,7 +691,7 @@ end
         predicted_list(:, pointCnt-1) = [V_predicted;lambda_predicted];
         corrected_list(:, pointCnt) = [V;lambda];
 		
-		if shouldIPlotEverything, plotBusCurve(continuationBus) end
+		if shouldIPlotEverything, plotBusCurve(continuationBus); end
     end
     
     function plotBusCurve(bus)

@@ -255,50 +255,41 @@ while i < max_iter
 	else
 		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_corr, lambda, stepSize, ref, pv, pq);
     end
-    error_predicted = max(abs(V_predicted- V));
     
-    
+           
     %% check prediction to make sure step is not too big so as to cause non-convergence
+    
+    error_predicted = max(abs(V_predicted- V));
     if ~success && error_predicted > 0.1
         newStepSize = 0.8*stepSize; %cut down the step size to reduce the prediction error
-%         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         if newStepSize > minStepSize,
             if verbose, fprintf('\t\tpredicted voltage change: %.2f. Step Size reduced from %.3f to %.3f\n', error_predicted, stepSize, newStepSize); end
             stepSize = newStepSize;
-            i = i-1;
-            
-            continue
-        end
-        
+            i = i-1;            
+            continue;
+        end       
     end
-%     slope = max(abs(V_predicted-V) ./ (lambda_predicted - lambda))
-
+    
     %% do voltage correction to find corrected point
     [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 	
-
-    %% calculate slope (dP/dLambda) at current point
-	[slope, ~] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
-	
-	if success == false  && stepSize > minStepSize,		
+    % if voltage correction fails, reduce step size and try again
+    if success == false  && stepSize > minStepSize,		
 		stepSize = stepSize * 0.3;		
 		if verbose, fprintf('\t\tdidnt solve; changed stepsize to: %f\n', stepSize); end
-% 		success = true;
 		i = i-1;
 		V = V_saved;
 		lambda = lambda_saved;
 		continue;
     end
 
-    
-    
-    
-    
-	error = abs(V-V_predicted)./abs(V);
-	if slope< 10^-10 || nnz(error) == 0, finished = true; break; end
-   
-	if mean(error) == 0, break; end %dubious
+    %% calculate slope (dP/dLambda) at current point
+	[slope, ~] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
 	
+
+    
+    %% if successful, check max error and adjust step sized to get a better error (meaning, balanced between a bigger step size and making sure we still converge)
+	error = abs(V-V_predicted)./abs(V);    
 	if abs(log(mean(error)/0.0001)) > 1 && mean(error)>0,
         newStepSize = stepSize - 0.1*log(mean(error)/0.0001); %adjust step size
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
@@ -424,6 +415,8 @@ while j < max_iter && ~finished
 
     elseif abs(error_order) > 2 && prediction_error>0, %if we havent just dropped the stepSize, consider changing it to get a better error outcome
 %         newStepSize = stepSize - 0.1*log(prediction_error/0.000001); %adjust step size
+% 	proposedStepSize = min( max(stepSize - 0.03*log( mean(prediction_error)/0.0001), minStepSize), maxStepSize);
+
         newStepSize = stepSize * 1.1;
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         
@@ -431,43 +424,17 @@ while j < max_iter && ~finished
         stepSize = newStepSize;
 	end
 	
-    
-    
-% 	
-% 	if success == false  && stepSize > minStepSize,	
-% 		stepSize = stepSize * 0.3;	
-% 		if verbose, fprintf('\t\tdidnt solve; changed stepsize to: %f\n', stepSize); end
-% 		i = i-1;
-% 		V = V_saved;
-% 		lambda = lambda_saved;
-% 		continue;
-% 	end
 	
 	prediction_error = mean(abs(V-V_predicted)./abs(V));
 	
 
     %% calculate slope (dP/dLambda) at current point
     mSlopes = abs(V-V_saved)./(lambda-lambda_saved);
-%     mSlopes = abs( (abs(V)-abs(V_saved))./(lambda-lambda_saved));
-    
-    
-%     mSlopes = mSlopes(pq); 
     [~,continuationBusPQ] = max(abs(mSlopes(pq))); %limit to only PQ busses
     continuationBus = pq(continuationBusPQ);
     slope = mSlopes(continuationBus);
-    
-%     if shouldIPlotEverything,
-%         plotBusCurve(continuationBus);
-%     end
 	slopes = [slopes slope];%log the slope
-% 	
-% 	proposedStepSize = min( max(stepSize - 0.03*log( mean(prediction_error)/0.0001), minStepSize), maxStepSize);
-% 	
-% 	stepSize = startSlope/slope^3 * proposedStepSize + (1-startSlope/slope^3) * minStepSize;
-% 	
-% 	if slope< 10^-10 || prediction_error == 0, 
-% 		finished = true; break; end
-	
+
     
     if success %if correction step converged, log values and do verbosity
         if verbose > 2
@@ -618,9 +585,9 @@ end
 
 
 if success, %assuming we didn't fail out, try to solve for lambda = 0
-    [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda_saved, lambda_saved, 1, initQPratio, participation_i, flag_lambdaIncrease);
+    [V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda_saved, lambda_saved, 1, initQPratio, participation_i, flag_lambdaIncrease);
     
-    [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
+    [V, lambda, success, ~] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
     
     if success
         if verbose > 2
