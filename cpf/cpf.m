@@ -238,7 +238,7 @@ maxStepSize = 2;
 stepSize = min(max(sigmaForLambda, minStepSize),maxStepSize);
 
 finished = false;
-
+continuationBus = pq(1);
 
 i = 0; j=0; k=0; %initialize counters for each phase to zero
 while i < max_iter
@@ -278,7 +278,7 @@ while i < max_iter
 	
 
     %% calculate slope (dP/dLambda) at current point
-	[slope, continuationBus] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
+	[slope, ~] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
 	
 	if success == false  && stepSize > minStepSize,		
 		stepSize = stepSize * 0.3;		
@@ -316,22 +316,8 @@ while i < max_iter
         end
 
         %% record data
+        logStepResults()
         pointCnt = pointCnt + 1;
-		Vpr = [Vpr, V_predicted];
-		lambda_pr = [lambda_pr, lambda_predicted];
-		V_corr = [V_corr, V];
-		lambda_corr = [lambda_corr, lambda];
-		correctionIters = [correctionIters, iterNum];
-		
-        predicted_list(:, pointCnt-1) = [V_predicted;lambda_predicted];
-        corrected_list(:, pointCnt) = [V;lambda];
-		
-		if shouldIPlotEverything,
-% 			hold on; scatter(lambda, slope); hold off;
-			plot(lambda_corr, abs(V_corr(whatBusShouldIPlot,:)), '.-', 'markers', 10);
-			hold on; scatter(lambda_corr, abs(Vpr(whatBusShouldIPlot,:)), 'r'); hold off
-			pause(0.01);
-		end
     end
     
     
@@ -426,7 +412,7 @@ while j < max_iter && ~finished
     error_order = log(prediction_error/0.000001);
     
     if ( mean_step > 0.00001 && ~success) % if we jumped too far and correction step didn't converge
-        newStepSize = stepSize * 0.8;
+        newStepSize = stepSize * 0.4;
         if newStepSize > minStepSize, %if we are not below min step-size threshold go back and try again with new stepSize
             if verbose, fprintf('\t\tpredicted voltage change: %f. Step Size reduced from %.5f to %.5f\n', mean_step, stepSize, newStepSize); end
             stepSize = newStepSize;
@@ -462,6 +448,7 @@ while j < max_iter && ~finished
 
     %% calculate slope (dP/dLambda) at current point
     mSlopes = abs(V-V_saved)./(lambda-lambda_saved);
+%     mSlopes = abs( (abs(V)-abs(V_saved))./(lambda-lambda_saved));
     
     
 %     mSlopes = mSlopes(pq); 
@@ -489,23 +476,7 @@ while j < max_iter && ~finished
         end
 
         %% record data
-%         pointCnt = pointCnt + 1;
-		
-		Vpr = [Vpr, V_predicted];
-		lambda_pr = [lambda_pr, lambda_predicted];
-		V_corr = [V_corr, V];
-		lambda_corr = [lambda_corr, lambda];
-		
-		correctionIters2 = [correctionIters2 iterNum];
-		predictionErrors2 = [predictionErrors2 error];
-		
-        predicted_list(:, pointCnt-1) = [V_predicted;lambda_predicted];
-        corrected_list(:, pointCnt) = [V;lambda];
-		
-		if shouldIPlotEverything,
-            plotBusCurve(continuationBus)
-        end
-        
+		logStepResults()
         pointCnt = pointCnt + 1;
     end
     
@@ -569,7 +540,7 @@ flag_lambdaIncrease = false;
 
 
 %set step size for Phase 3
-maxIncrease = 0.3
+maxIncrease = 0.3;
 minStepSize = 0.01;
 maxStepSize = 2;
 
@@ -578,6 +549,8 @@ while k < max_iter && ~finished
     %% update iteration counter
     k = k + 1;
     
+    
+    %% store V and lambda
     V_saved = V;
     lambda_saved = lambda;
     
@@ -590,10 +563,6 @@ while k < max_iter && ~finished
     %% calculate slope (dP/dLambda) at current point
 	slope = min( abs( V-V_saved)./(lambda-lambda_saved));
 	
-	
-% 	if slope< 10^-10 || error == 0, 
-%         finished = true; break; end
-%     slope = abs(V(loadvarloc_i) - V_saved(loadvarloc_i))/(lambda - lambda_saved);
 
     mean_error = mean( abs( V-V_predicted));
     error_order = log(mean_error/0.001);
@@ -625,28 +594,15 @@ while k < max_iter && ~finished
         end
 
         %% record data
-		
-		Vpr = [Vpr, V_predicted];
-		lambda_pr = [lambda_pr, lambda_predicted];
-		V_corr = [V_corr, V];
-		lambda_corr = [lambda_corr, lambda];
-		
-        predicted_list(:, pointCnt-1) = [V_predicted;lambda_predicted];
-        corrected_list(:, pointCnt) = [V;lambda];
-		
-		if shouldIPlotEverything,
-% 			plot(lambda_corr, abs(V_corr(continuationBus,:)), '.-', 'markers', 12);
-% 			hold on; scatter(lambda_corr, abs(Vpr(cotinuationBus,:)), 'r'); hold off
-            plotBusCurve(continuationBus)
-        end
-        
+		logStepResults()
         pointCnt = pointCnt + 1;
         
     end
     
     
     if success == false % voltage correction step fails.
-		
+		V = V_saved;
+        lambda = lambda_saved;
         if verbose > 0
 			if ~isempty(strfind(lastwarn, 'singular'))
 				fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n');
@@ -674,20 +630,7 @@ if success, %assuming we didn't fail out, try to solve for lambda = 0
 
         %% record data
         pointCnt = pointCnt + 1;
-		
-		Vpr = [Vpr, V_predicted];
-		lambda_pr = [lambda_pr, lambda_predicted];
-		V_corr = [V_corr, V];
-		lambda_corr = [lambda_corr, lambda];
-		
-        predicted_list(:, pointCnt-1) = [V_predicted;lambda_predicted];
-        corrected_list(:, pointCnt) = [V;lambda];
-		
-		if shouldIPlotEverything,
-            plotBusCurve(continuationBus)
-        end
-        
-        
+		logStepResults()
     end
 end
 
@@ -697,9 +640,7 @@ if verbose > 0
     fprintf('\t[Info]:\t%d data points contained in phase 3.\n', pointCnt_Phase3);
 end
 
-if shouldIPlotEverything,
-    figure;	plot(lambda_corr, abs(V_corr))
-end
+if shouldIPlotEverything, figure;	plot(lambda_corr, abs(V_corr)); end
 et = etime(clock, t0);
 
 if i == max_iter,
@@ -767,8 +708,19 @@ if nargout == 1,
 	
 	max_lambda = results; %return a single struct
 end
-
-
+    
+    function logStepResults()
+        Vpr = [Vpr, V_predicted];
+		lambda_pr = [lambda_pr, lambda_predicted];
+		V_corr = [V_corr, V];
+		lambda_corr = [lambda_corr, lambda];
+		
+        predicted_list(:, pointCnt-1) = [V_predicted;lambda_predicted];
+        corrected_list(:, pointCnt) = [V;lambda];
+		
+		if shouldIPlotEverything, plotBusCurve(continuationBus); end
+    end
+    
     function plotBusCurve(bus)
         %use backwards order so that earlier points end up on top
         

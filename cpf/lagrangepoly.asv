@@ -3,8 +3,8 @@ function   Lx = lagrangepoly(x, xs, ys)
 	%
 	% This function uses the lagrange polynomial formulation to perform interpolation
 	% or extrapolation via polynomial. It works by returning y = L(x), where L represents the lagrange 
-	% polynomial derived from x,xs and ys. The order of the polynomial is
-	% determined by the number of samples in the input.
+	% polynomial derived from x,xs and ys. The order of the Lagrange
+	% polynomial is determin
 	%
 	% inputs:
 	%  x: x-axis value for which you are seeking y value inter/extra-polation.
