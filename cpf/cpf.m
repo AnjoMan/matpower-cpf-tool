@@ -216,7 +216,7 @@ slopes = [];
 
 
 
-pointCnt = pointCnt + 1;
+% pointCnt = pointCnt + 1;
 Vpr = [Vpr, V_predicted];
 lambda_pr = [lambda_pr, lambda_predicted];
 V_corr = [V_corr, V];
@@ -240,6 +240,7 @@ continuationBus = pq(1);
 
 i = 0; j=0; k=0; %initialize counters for each phase to zero
 while i < max_iter
+    
     %% update iteration counter
     i = i + 1;
     
@@ -321,6 +322,7 @@ while i < max_iter
         if success == false
             V = V_saved;
             lambda = lambda_saved;
+            i = i-1;
         end 
 
 		if verbose > 0
@@ -343,9 +345,8 @@ end
 
 % fprintf('Average prediction error for voltage: %f\n', mean(mean( abs( V_corr - Vpr)./abs(V_corr))));
 % fprintf('Avg num of iterations: %f\n', mean(correctionIters));
-pointCnt_Phase1 = pointCnt; % collect number of points obtained at this phase
 if verbose > 0
-    fprintf('\t[Info]:\t%d data points contained in phase 1.\n', pointCnt_Phase1);
+    fprintf('\t[Info]:\t%d data points contained in phase 1.\n', i);
 end
 
 
@@ -366,9 +367,6 @@ predictionErrors2 = [];
 
 maxStepSize = 0.1;
 minStepSize = 0.0001;
-% maxStepSize_voltage = 0.1;
-% minStepSize_voltage = 0.0001;
-startSlope = slope;
 stepSize = sigmaForVoltage;
 j = 0;
 while j < max_iter && ~finished
@@ -447,15 +445,16 @@ while j < max_iter && ~finished
     
     
     
-    %% instead of using condition number as criteria for switching between
-    %% modes...
-    %%    if rcond(J) >= condNumThresh_Phase2 | success == false % Jacobian matrix is good-conditioned, or correction step fails
-    %% ...we use PV curve slopes as the criteria for switching modes:
+    % instead of using condition number as criteria for switching between
+    % modes...
+    %    if rcond(J) >= condNumThresh_Phase2 | success == false % Jacobian matrix is good-conditioned, or correction step fails
+    % ...we use PV curve slopes as the criteria for switching modes:
     if ~success || (slope < 0 && slope > -slopeThresh_Phase2),
 
         % restore good data
         V = V_saved;
         lambda = lambda_saved;
+        j = j-1;
 
         %% ---change to voltage prediction-correction (lambda decreasing)
         if verbose > 0
@@ -482,10 +481,8 @@ end
 
 % fprintf('Average prediction error for voltage: %f\n', mean(predictionErrors2));
 % fprintf('Avg num of iterations: %f\n', mean(correctionIters2));
-
-pointCnt_Phase2 = pointCnt - pointCnt_Phase1; % collect number of points obtained at this phase
 if verbose > 0
-    fprintf('\t[Info]:\t%d data points contained in phase 2.\n', pointCnt_Phase2);
+    fprintf('\t[Info]:\t%d data points contained in phase 2.\n', j);
 end
 
 
@@ -565,9 +562,10 @@ while k < max_iter && ~finished
     end
     
     
-    if success == false % voltage correction step fails.
+    if ~success % voltage correction step fails.
 		V = V_saved;
         lambda = lambda_saved;
+        k = k-1;
         if verbose > 0
 			if ~isempty(strfind(lastwarn, 'singular'))
 				fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n');
@@ -602,38 +600,14 @@ end
 
 max_lambda = max(lambda_corr);
 
-pointCnt_Phase3 = pointCnt - pointCnt_Phase2 - pointCnt_Phase1; % collect number of points obtained at this phase
 
 
+if verbose > 0, fprintf('\t[Info]:\t%d data points contained in phase 3.\n', k);
+    fprintf('\t[Info]:\t%d data points total.\n', pointCnt); end
 
-if verbose > 0, fprintf('\t[Info]:\t%d data points contained in phase 3.\n', pointCnt_Phase3); end
 if shouldIPlotEverything, figure;	plot(lambda_corr, abs(V_corr)); end
 et = etime(clock, t0);
 if i == max_iter, fprintf('\t[Info] Max iterations hit.\n'); end
-
-
-% if ~isempty(predicted_list) && ~isempty(corrected_list),
-% 	%% combine the prediction and correction data in the sequence of appearance
-% 	% NOTE: number of prediction data is one less than that of correction data
-% 	predictedCnt = size(predicted_list, 2);
-% 	combined_list(:, 1) = corrected_list(:, 1);
-% 	for i = 1:predictedCnt
-% 		combined_list(:, 2*i)     = predicted_list(:, i);
-% 		combined_list(:, 2*i+1)   = corrected_list(:, i+1);
-% 	end
-% 
-% 	%% convert back to original bus numbering & print results
-% 	[bus, gen, branch] = int2ext(i2e, bus, gen, branch);
-% 
-% 	%% add bus number as the first column to the prediction, correction, and combined data list
-% 	nb          = size(bus, 1);
-% 	max_lambda  = max(corrected_list(nb+1, :));
-% 	predicted_list = [[bus(:, BUS_I);0] predicted_list];
-% 	corrected_list = [[bus(:, BUS_I);0] corrected_list];
-% 	combined_list  = [[bus(:, BUS_I);0] combined_list];
-% else
-% 	combined_list = [];
-% end
 
 
 %% reorder according to exterior bus numbering
