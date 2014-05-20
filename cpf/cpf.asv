@@ -575,7 +575,26 @@ max_lambda = max(lambda_corr);
 
 
 
-if shouldIPlotEverything, figure;	plot(lambda_corr, abs(V_corr)); end
+if shouldIPlotEverything, 
+    figure;	
+    
+    hold on;
+      
+    mlines =plot(lambda_corr, abs(V_corr)); 
+    plot([max_lambda, max_lambda], ylim,'LineStyle', '--','Color',[0.8,0.8,0.8]);  
+    uistack(mlines);
+    
+    hold off;
+    
+    text(max_lambda*0.85, 0.1, sprintf('Lambda: %.2f',max_lambda), 'Color', [0.7,0.7,0.7]);
+    
+    title('PV curves for all buses.');
+    ylabel('Voltage (p.u.)')
+    xlabel('Lambda power scaling');
+    
+%     ylims = ylim;
+    
+end
 et = etime(clock, t0);
 
 
@@ -635,6 +654,18 @@ end
 %         fprintf('Points in 1, Phase 1, Phase 2, Phase 3: %d. Total Points: %d',1+i+j+k, pointCnt)
         
         scatter(lambda_pr, abs(V_pr(bus,:)),'r'); hold off;
+        
+        title('PV curves for fastest-changing bus');
+        ylabel('Voltage (p.u.)')
+        xlabel('Lambda power scaling');
+        ml = max(lambda_corr);
+        ylims = ylim;
+        
+        hold on;
+            line=plot( [ml, ml], ylims, 'LineStyle', '--', 'Color', [0.7,0.7,0.7]);
+            txt=text(ml*.85, ylims(1) + (diff(ylims)) * 0.1, sprintf('Lambda: %2f', ml));
+            uistack(il
+        hold off;
         
     end
 

@@ -575,7 +575,26 @@ max_lambda = max(lambda_corr);
 
 
 
-if shouldIPlotEverything, figure;	plot(lambda_corr, abs(V_corr)); end
+if shouldIPlotEverything, 
+    figure;	
+    
+    hold on;      
+        plot(lambda_corr, abs(V_corr)); 
+        maxL =plot([max_lambda, max_lambda], ylim,'LineStyle', '--','Color',[0.8,0.8,0.8]);  
+        mText = text(max_lambda*0.85, 0.1, sprintf('Lambda: %3.2f',max_lambda), 'Color', [0.7,0.7,0.7]);
+    
+        uistack(maxL, 'bottom');    
+        uistack(mText, 'bottom');
+    hold off;
+    
+    
+    title('PV curves for all buses.');
+    ylabel('Voltage (p.u.)')
+    xlabel('Lambda power scaling');
+    
+%     ylims = ylim;
+    
+end
 et = etime(clock, t0);
 
 
@@ -635,6 +654,20 @@ end
 %         fprintf('Points in 1, Phase 1, Phase 2, Phase 3: %d. Total Points: %d',1+i+j+k, pointCnt)
         
         scatter(lambda_pr, abs(V_pr(bus,:)),'r'); hold off;
+        
+        title(sprintf('PV curve for bus %d.', continuationBus));
+        ylabel('Voltage (p.u.)')
+        xlabel('Power scaling');
+        ml = max(lambda_corr);
+        ylims = ylim;
+        
+        hold on;
+            mLine=plot( [ml, ml], ylims, 'LineStyle', '--', 'Color', [0.8,0.8,0.8]);
+            mText=text(ml*.85, ylims(1) + (diff(ylims)) * 0.95, sprintf('Lambda: %3.2f', ml), 'Color', [0.7,0.7,0.7]);
+            uistack(mLine, 'bottom');
+            uistack(mText, 'bottom');
+        hold off;
+        
         
     end
 
