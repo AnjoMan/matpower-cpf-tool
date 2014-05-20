@@ -581,16 +581,21 @@ if shouldIPlotEverything,
     hold on;      
         plot(lambda_corr, abs(V_corr)); 
         maxL =plot([max_lambda, max_lambda], ylim,'LineStyle', '--','Color',[0.8,0.8,0.8]);  
-        mText = text(max_lambda*0.85, 0.1, sprintf('Lambda: %3.2f',max_lambda), 'Color', [0.7,0.7,0.7]);
+%         mText = text(max_lambda*0.85, 0.1, sprintf('Lambda: %3.2f',max_lambda), 'Color', [0.7,0.7,0.7]);
+        
+        ticks = get(gca, 'XTick');
+        ticks = ticks(abs(ticks - ml) > 0.5);
+        ticks = sort(unique([ticks round(ml*1000)/1000]));
+        set(gca, 'XTick', ticks);
     
         uistack(maxL, 'bottom');    
-        uistack(mText, 'bottom');
+%         uistack(mText, 'bottom');
     hold off;
     
     
     title('PV curves for all buses.');
     ylabel('Voltage (p.u.)')
-    xlabel('Lambda power scaling');
+    xlabel('Power (lambda load scaling factor)');
     
 %     ylims = ylim;
     
@@ -636,39 +641,41 @@ end
         %use backwards order so that earlier points end up on top
         
         %plot phase 3
-        plot(lambda_corr(1+i+j:1+i+j+k), abs(V_corr(bus, 1+i+j:1+i+j+k)), '.-b', 'markers',12); hold on;
+        p3=plot(lambda_corr(1+i+j:1+i+j+k), abs(V_corr(bus, 1+i+j:1+i+j+k)), '.-b', 'markers',12); hold on;
         
         %plot phase 2
-        plot(lambda_corr(1+i:1+i+j), abs(V_corr(bus, 1+i:1+i+j)), '.-g', 'markers', 12);
+        p2=plot(lambda_corr(1+i:1+i+j), abs(V_corr(bus, 1+i:1+i+j)), '.-g', 'markers', 12);
         
         %plot phase 1
-        plot(lambda_corr(1:1+i), abs(V_corr(bus,1:i+1)), '.-b', 'markers', 12);
+        p1=plot(lambda_corr(1:1+i), abs(V_corr(bus,1:i+1)), '.-b', 'markers', 12);
         
         
         %plot initial point
-        plot(lambda_corr(1), abs(V_corr(bus,1)), '.-k', 'markers', 12);
+        st=plot(lambda_corr(1), abs(V_corr(bus,1)), '.-k', 'markers', 12);
              
         if 1+i+j+k < nPoints,
-           plot(lambda_corr(end-1:end), abs(V_corr(bus, end-1:end)),'.-k', 'markers', 12);
+            en=plot(lambda_corr(end-1:end), abs(V_corr(bus, end-1:end)),'.-k', 'markers', 12);
         end
 %         fprintf('Points in 1, Phase 1, Phase 2, Phase 3: %d. Total Points: %d',1+i+j+k, pointCnt)
         
-        scatter(lambda_pr, abs(V_pr(bus,:)),'r'); hold off;
+        pred=scatter(lambda_pr, abs(V_pr(bus,:)),'r'); hold off;
         
         title(sprintf('PV curve for bus %d.', continuationBus));
         ylabel('Voltage (p.u.)')
-        xlabel('Power scaling');
+        xlabel('Power (lambda load scaling factor)');
         ml = max(lambda_corr);
         ylims = ylim;
         
+        ticks = get(gca, 'XTick');
+        ticks = ticks(abs(ticks - ml) > 0.5);
+        ticks = sort(unique([ticks round(ml*1000)/1000]));
+        set(gca, 'XTick', ticks);
         hold on;
             mLine=plot( [ml, ml], ylims, 'LineStyle', '--', 'Color', [0.8,0.8,0.8]);
-            mText=text(ml*.85, ylims(1) + (diff(ylims)) * 0.95, sprintf('Lambda: %3.2f', ml), 'Color', [0.7,0.7,0.7]);
             uistack(mLine, 'bottom');
-            uistack(mText, 'bottom');
         hold off;
-        
-        
+        legend([pred, p1,p2, mLine], {'Predicted Values', 'Lambda Continuation', 'Voltage Continuation', 'Max Lambda'})
+     
     end
 
 
