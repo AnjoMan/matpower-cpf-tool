@@ -602,78 +602,62 @@ if success, %assuming we didn't fail out, try to solve for lambda = 0
 end
 
 
-pointCnt_Phase3 = pointCnt - pointCnt_Phase2 - pointCnt_Phase1; % collect number of points obtained at this phase
-if verbose > 0
-    fprintf('\t[Info]:\t%d data points contained in phase 3.\n', pointCnt_Phase3);
-end
+max_lambda = max(lambda_corr);
 
+pointCnt_Phase3 = pointCnt - pointCnt_Phase2 - pointCnt_Phase1; % collect number of points obtained at this phase
+
+
+
+if verbose > 0, fprintf('\t[Info]:\t%d data points contained in phase 3.\n', pointCnt_Phase3); end
 if shouldIPlotEverything, figure;	plot(lambda_corr, abs(V_corr)); end
 et = etime(clock, t0);
+if i == max_iter, fprintf('\t[Info] Max iterations hit.\n'); end
 
-if i == max_iter,
-	fprintf('\t[Info] Max iterations hit.\n');
-end
 
-if  ~exist('corrected_list','var') | ~exist('predicted_list','var'),
-
-	max_lambda = NaN;
-	predicted_list = [];
-	corrected_list = [];
-	combined_list = [];
-	success=false;
-end
-
-if ~exist('max_lambda', 'var'),
-	max_lambda = NaN;
-	success==false;
-end
-
-if ~isempty(predicted_list) && ~isempty(corrected_list),
-	%% combine the prediction and correction data in the sequence of appearance
-	% NOTE: number of prediction data is one less than that of correction data
-	predictedCnt = size(predicted_list, 2);
-	combined_list(:, 1) = corrected_list(:, 1);
-	for i = 1:predictedCnt
-		combined_list(:, 2*i)     = predicted_list(:, i);
-		combined_list(:, 2*i+1)   = corrected_list(:, i+1);
-	end
-
-	%% convert back to original bus numbering & print results
-	[bus, gen, branch] = int2ext(i2e, bus, gen, branch);
-
-	%% add bus number as the first column to the prediction, correction, and combined data list
-	nb          = size(bus, 1);
-	max_lambda  = max(corrected_list(nb+1, :));
-	predicted_list = [[bus(:, BUS_I);0] predicted_list];
-	corrected_list = [[bus(:, BUS_I);0] corrected_list];
-	combined_list  = [[bus(:, BUS_I);0] combined_list];
-else
-	combined_list = [];
-end
+% if ~isempty(predicted_list) && ~isempty(corrected_list),
+% 	%% combine the prediction and correction data in the sequence of appearance
+% 	% NOTE: number of prediction data is one less than that of correction data
+% 	predictedCnt = size(predicted_list, 2);
+% 	combined_list(:, 1) = corrected_list(:, 1);
+% 	for i = 1:predictedCnt
+% 		combined_list(:, 2*i)     = predicted_list(:, i);
+% 		combined_list(:, 2*i+1)   = corrected_list(:, i+1);
+% 	end
+% 
+% 	%% convert back to original bus numbering & print results
+% 	[bus, gen, branch] = int2ext(i2e, bus, gen, branch);
+% 
+% 	%% add bus number as the first column to the prediction, correction, and combined data list
+% 	nb          = size(bus, 1);
+% 	max_lambda  = max(corrected_list(nb+1, :));
+% 	predicted_list = [[bus(:, BUS_I);0] predicted_list];
+% 	corrected_list = [[bus(:, BUS_I);0] corrected_list];
+% 	combined_list  = [[bus(:, BUS_I);0] combined_list];
+% else
+% 	combined_list = [];
+% end
 
 
 %% reorder according to exterior bus numbering
 V_corr = V_corr(i2e(e2i),:);
-Vpr = Vpr(i2e(e2i));
+Vpr = Vpr(i2e(e2i),:);
 
 if nargout > 1, % LEGACY create predicted, corrected, combined lists
-    combined_list = zeros( size(V_corr,1) + 1, 1+size(V_corr,2) + size(Vpr,2)-1);
+%     combined_list = zeros( size(V_corr,1) + 1, 1+size(V_corr,2) + size(Vpr,2)-1);
     predicted_list = [ [bus(:,1); 0] [Vpr; lambda_pr]];
     corrected_list = [ [bus(:,1); 0] [V_corr; lambda_corr]];
-    combined_list = [ [bus(:,1); 0] [V_corr(:,1); lambda_corr(1)]];
     
     combined_list = [bus(:,1); 0];
-    combined_list(:,(1:size(V_corr,2))*2) = 
+    combined_list(:,(1:size(V_corr,2))*2) = [V_corr; lambda_corr];
+    combined_list(:,(1:size(Vpr,2)-1)*2+1) = [Vpr(:,2:end); lambda_pr(2:end)];
     
 end
 
 if verbose > 1
-    Vm_corrected = abs(corrected_list);
-    Vm_predicted = abs(predicted_list);
-    Vm_combined  = abs(combined_list);
+    Vm_corrected = abs(V_corr);
+    Vm_predicted = abs(Vpr);
     Vm_corrected
     Vm_predicted
-    Vm_combined
     pointCnt_Phase1
     pointCnt_Phase2
     pointCnt_Phase3
