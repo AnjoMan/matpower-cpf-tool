@@ -651,6 +651,22 @@ else
 	combined_list = [];
 end
 
+
+%% reorder according to exterior bus numbering
+V_corr = V_corr(i2e(e2i),:);
+Vpr = Vpr(i2e(e2i),:);
+
+if nargout > 1, % LEGACY create predicted, corrected, combined lists
+%     combined_list = zeros( size(V_corr,1) + 1, 1+size(V_corr,2) + size(Vpr,2)-1);
+    predicted_list = [ [bus(:,1); 0] [Vpr; lambda_pr]];
+    corrected_list = [ [bus(:,1); 0] [V_corr; lambda_corr]];
+    
+    combined_list = [bus(:,1); 0];
+    combined_list(:,(1:size(V_corr,2))*2) = [V_corr; lambda_corr];
+    combined_list(:,(1:size(Vpr,2)-1)*2+1) = [Vpr(:,2:end); lambda_pr(2:end)];
+    
+end
+
 if verbose > 1
     Vm_corrected = abs(corrected_list);
     Vm_predicted = abs(predicted_list);

@@ -9,5 +9,9 @@ function test_cpf()% close all; clear all; clc
 
 
 
-    out = cpf(myCase,-1,5,0.025,true)
+%     out = cpf(myCase,-1,5,0.025,true)
+    [max_lambda, predicted, corrected, combined] = cpf(myCase, -1, 5,0.025,true);
+    
+    
+    
 end

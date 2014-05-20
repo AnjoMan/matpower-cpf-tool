@@ -255,47 +255,41 @@ while i < max_iter
 	else
 		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_corr, lambda, stepSize, ref, pv, pq);
     end
-    error_predicted = max(abs(V_predicted- V));
     
-    
+           
     %% check prediction to make sure step is not too big so as to cause non-convergence
+    
+    error_predicted = max(abs(V_predicted- V));
     if ~success && error_predicted > 0.1
         newStepSize = 0.8*stepSize; %cut down the step size to reduce the prediction error
-%         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         if newStepSize > minStepSize,
             if verbose, fprintf('\t\tpredicted voltage change: %.2f. Step Size reduced from %.3f to %.3f\n', error_predicted, stepSize, newStepSize); end
             stepSize = newStepSize;
-            i = i-1;
-            
-            continue
-        end
-        
+            i = i-1;            
+            continue;
+        end       
     end
-%     slope = max(abs(V_predicted-V) ./ (lambda_predicted - lambda))
-
+    
     %% do voltage correction to find corrected point
     [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 	
+    % if voltage correction fails, reduce step size and try again
+    if success == false  && stepSize > minStepSize,		
+		stepSize = stepSize * 0.3;		
+		if verbose, fprintf('\t\tdidnt solve; changed stepsize to: %f\n', stepSize); end
+		i = i-1;
+		V = V_saved;
+		lambda = lambda_saved;
+		continue;
+    end
 
     %% calculate slope (dP/dLambda) at current point
 	[slope, ~] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
-% 	
-% 	if success == false  && stepSize > minStepSize,		
-% 		stepSize = stepSize * 0.3;		
-% 		if verbose, fprintf('\t\tdidnt solve; changed stepsize to: %f\n', stepSize); end
-% % 		success = true;
-% 		i = i-1;
-% 		V = V_saved;
-% 		lambda = lambda_saved;
-% 		continue;
-%     end
+	
 
     
-    
-    
-    
-	error = abs(V-V_predicted)./abs(V);
-    
+    %% if successful, check max error and adjust step sized to get a better error (meaning, balanced between a bigger step size and making sure we still converge)
+	error = abs(V-V_predicted)./abs(V);    
 	if abs(log(mean(error)/0.0001)) > 1 && mean(error)>0,
         newStepSize = stepSize - 0.1*log(mean(error)/0.0001); %adjust step size
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
@@ -655,6 +649,22 @@ if ~isempty(predicted_list) && ~isempty(corrected_list),
 	combined_list  = [[bus(:, BUS_I);0] combined_list];
 else
 	combined_list = [];
+end
+
+
+%% reorder according to exterior bus numbering
+V_corr = V_corr(i2e(e2i),:);
+Vpr = Vpr(i2e(e2i));
+
+if nargout > 1, % LEGACY create predicted, corrected, combined lists
+    combined_list = zeros( size(V_corr,1) + 1, 1+size(V_corr,2) + size(Vpr,2)-1);
+    predicted_list = [ [bus(:,1); 0] [Vpr; lambda_pr]];
+    corrected_list = [ [bus(:,1); 0] [V_corr; lambda_corr]];
+    combined_list = [ [bus(:,1); 0] [V_corr(:,1); lambda_corr(1)]];
+    
+    combined_list = [bus(:,1); 0];
+    combined_list(:,(1:size(V_corr,2))*2) = 
+    
 end
 
 if verbose > 1
