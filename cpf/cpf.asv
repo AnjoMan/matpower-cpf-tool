@@ -170,6 +170,11 @@ if any(isnan(initQPratio)),
 end
 
 
+
+
+
+
+
 lambda0 = 0; %changed from 2 -> 0 
 lambda = lambda0;
 Vm = ones(size(bus, 1), 1);          %% flat start
@@ -177,82 +182,81 @@ Va = bus(ref(1), VA) * Vm;
 V  = Vm .* exp(1i* pi/180 * Va);
 V(gbus) = gen(on, VG) ./ abs(V(gbus)).* V(gbus);
 
-nPoints = 0;
 
-%% do voltage correction (ie, power flow) to get initial voltage profile
-lambda_predicted = lambda;
-V_predicted = V;
-[V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
-%% record data
-if any(isnan(V))
-    err = MException('CPF:correctVoltageError', 'Generating initial voltage profile');
-    errCause = MException('CPF:correctVoltageError', ['NaN bus voltage at ', mat2str(i2e(isnan(V)))]);
-    err = addCause(err,errCause);
-    
-    throw(err);
-end
 
-nPoints = nPoints + 1;
 
 
 %%------------------------------------------------
 % do cpf prediction-correction iterations
 %%------------------------------------------------
 t0 = clock;
-%% --- Start Phase 1: voltage prediction-correction (lambda increasing)
-if verbose > 0
-    fprintf('Start Phase 1: voltage prediction-correction (lambda increasing).\n');
-end
 
-
-Vpr = []; V_pr=[];
+nPoints = 0;
+V_pr=[];
 lambda_pr = [];
 V_corr = [];
 lambda_corr = [];
 correctionIters = []; 
 slopes = [];
 
-Vpr = [Vpr, V_predicted];
-lambda_pr = [lambda_pr, lambda_predicted];
-V_corr = [V_corr, V];
-lambda_corr = [lambda_corr, lambda];
-correctionIters = [correctionIters, iterNum];
 
 
 
 
-% stepSize = 1
+
+%% do voltage correction (ie, power flow) to get initial voltage profile
+lambda_predicted = lambda;
+V_predicted = V;
+[V, lambda, success, ~] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
+
+
+if any(isnan(V))
+    err = MException('CPF:correctVoltageError', 'Generating initial voltage profile');
+    err = addCause(err,MException('CPF:correctVoltageError', ['NaN bus voltage at ', mat2str(i2e(isnan(V)))]));    
+    throw(err);
+end
+
+logStepResults();
+nPoints = nPoints + 1;
+
+
+
+
+
+
+
+
+
+%% --- Start Phase 1: voltage prediction-correction (lambda increasing)
+if verbose > 0, fprintf('Start Phase 1: voltage prediction-correction (lambda increasing).\n'); end
+
 
 %parametrize step size for Phase 1
 minStepSize = 0.01;
 maxStepSize = 2;
 
-
-stepSize = min(max(sigmaForLambda, minStepSize),maxStepSize);
+stepSize = sigmaForLambda;
+stepSize = min(max(stepSize, minStepSize),maxStepSize);
 
 finished = false;
 continuationBus = pq(1);
 
 i = 0; j=0; k=0; %initialize counters for each phase to zero
-while i < max_iter
-    
-    %% update iteration counter
-    i = i + 1;
+while i < max_iter    
+    i = i + 1; % update iteration counter
     
     % save good data
     V_saved = V;
     lambda_saved = lambda;
     
-	if nPoints<4, 
-		%% do voltage prediction to find predicted point (predicting voltage)
-		[V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
-	else
+	if nPoints<4, % do voltage prediction to find predicted point (predicting voltage)
+		[V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
+    else %if we have enough points, use lagrange polynomial
 		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_corr, lambda, stepSize, ref, pv, pq);
     end
     
            
-    %% check prediction to make sure step is not too big so as to cause non-convergence
-    
+    %% check prediction to make sure step is not too big so as to cause non-convergence    
     error_predicted = max(abs(V_predicted- V));
     if ~success && error_predicted > 0.1
         newStepSize = 0.8*stepSize; %cut down the step size to reduce the prediction error
@@ -265,7 +269,7 @@ while i < max_iter
     end
     
     %% do voltage correction to find corrected point
-    [V, lambda, success, iterNum] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
+    [V, lambda, success, ~] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 	
     % if voltage correction fails, reduce step size and try again
     if success == false  && stepSize > minStepSize,		
@@ -277,6 +281,8 @@ while i < max_iter
 		continue;
     end
 
+    
+    
     %% calculate slope (dP/dLambda) at current point
 	[slope, ~] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
 	
@@ -355,6 +361,7 @@ end
 maxStepSize = 0.1;
 minStepSize = 0.0001;
 stepSize = sigmaForVoltage;
+stepSize = min(max(stepSize, minStepSize),maxStepSize);
 j = 0;
 while j < max_iter && ~finished
     %% update iteration counter
@@ -379,7 +386,7 @@ while j < max_iter && ~finished
     
   
 	
-	[V, lambda, success, iterNum] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, participation_i, ref, pv, pq, continuationBus);
+	[V, lambda, success, ~] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, participation_i, ref, pv, pq, continuationBus);
 	
     mean_step = mean( abs(V_predicted-V_saved));    
 	prediction_error = mean(abs(V-V_predicted)./abs(V));
@@ -408,15 +415,12 @@ while j < max_iter && ~finished
 	end
 	
 	
-	prediction_error = mean(abs(V-V_predicted)./abs(V));
-	
 
     %% calculate slope (dP/dLambda) at current point
     mSlopes = abs(V-V_saved)./(lambda-lambda_saved);
     [~,continuationBusPQ] = max(abs(mSlopes(pq))); %limit to only PQ busses
     continuationBus = pq(continuationBusPQ);
     slope = mSlopes(continuationBus);
-	slopes = [slopes slope];%log the slope
 
     
     if success %if correction step converged, log values and do verbosity
@@ -486,6 +490,7 @@ flag_lambdaIncrease = false;
 %set step size for Phase 3
 minStepSize = 0.01;
 maxStepSize = 2;
+stepSize = min(max(stepSize, minStepSize),maxStepSize);
 
 k = 0;
 while k < max_iter && ~finished
@@ -522,8 +527,7 @@ while k < max_iter && ~finished
     
     
     if success,
-        logStepResults()
-        
+        logStepResults()        
 		if shouldIPlotEverything, plotBusCurve(continuationBus); end
         nPoints = nPoints + 1;        
     end
@@ -545,76 +549,68 @@ while k < max_iter && ~finished
         break;        
     end
 end
-
-
 if verbose > 0, fprintf('\t[Info]:\t%d data points contained in phase 3.\n', k); end
+
+
+
+
+
+%% Get the last point (Lambda == 0)
 if success, %assuming we didn't fail out, try to solve for lambda = 0
     [V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda_saved, lambda_saved, 1, initQPratio, participation_i, flag_lambdaIncrease);
     [V, lambda, success, ~] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
     
-    if success,
-        nPoints = nPoints + 1;
+    if success,        
 		logStepResults()
+        nPoints = nPoints + 1;
+        plotBusCurve(continuationBus);
     end
 end
+
+if verbose > 0, fprintf('\t[Info]:\t%d data points total.\n', nPoints); end
 
 
 max_lambda = max(lambda_corr);
 
 
 
-if verbose > 0, fprintf('\t[Info]:\t%d data points total.\n', nPoints); end
 
 if shouldIPlotEverything, figure;	plot(lambda_corr, abs(V_corr)); end
 et = etime(clock, t0);
-if i == max_iter, fprintf('\t[Info] Max iterations hit.\n'); end
 
 
 %% reorder according to exterior bus numbering
-V_corr = V_corr(i2e(e2i),:);
-Vpr = Vpr(i2e(e2i),:);
 
 if nargout > 1, % LEGACY create predicted, corrected, combined lists
 %     combined_list = zeros( size(V_corr,1) + 1, 1+size(V_corr,2) + size(Vpr,2)-1);
-    predicted_list = [ [bus(:,1); 0] [Vpr; lambda_pr]];
+    predicted_list = [ [bus(:,1); 0] [V_pr; lambda_pr]];
     corrected_list = [ [bus(:,1); 0] [V_corr; lambda_corr]];
     
     combined_list = [bus(:,1); 0];
     combined_list(:,(1:size(V_corr,2))*2) = [V_corr; lambda_corr];
-    combined_list(:,(1:size(Vpr,2)-1)*2+1) = [Vpr(:,2:end); lambda_pr(2:end)];
+    combined_list(:,(1:size(V_pr,2)-1)*2+1) = [V_pr(:,2:end); lambda_pr(2:end)];
     
 end
 
-if verbose > 1
-    Vm_corrected = abs(V_corr);
-    Vm_predicted = abs(Vpr);
-    Vm_corrected
-    Vm_predicted
-    pointCnt_Phase1
-    pointCnt_Phase2
-    pointCnt_Phase3
-    nPoints
-end
 
 if nargout == 1,
 	results.max_lambda = max_lambda;
-	results.V_pr = Vpr;
+	results.V_pr = V_pr;
 	results.lambda_pr = lambda_pr;
 	results.V_corr = V_corr;
 	results.lambda_corr = lambda_corr;
 	results.success = success;
-	results.et = et;
+	results.time = et;
 	
 	max_lambda = results; %return a single struct
 end
     
     function logStepResults()
-        V_pr(:,nPoints+1) = V_predicted;
         
-        Vpr = [Vpr, V_predicted];
-		lambda_pr = [lambda_pr, lambda_predicted];
-		V_corr = [V_corr, V];
-		lambda_corr = [lambda_corr, lambda];		
+        V_pr(:,nPoints+1) = V_predicted;
+        lambda_pr(nPoints+1) = lambda_predicted;
+        V_corr(:,nPoints+1) = V;
+        lambda_corr(:,nPoints+1) = lambda;		
     end
     
     function plotBusCurve(bus)
@@ -638,7 +634,7 @@ end
         end
 %         fprintf('Points in 1, Phase 1, Phase 2, Phase 3: %d. Total Points: %d',1+i+j+k, pointCnt)
         
-        scatter(lambda_pr, abs(Vpr(bus,:)),'r'); hold off;
+        scatter(lambda_pr, abs(V_pr(bus,:)),'r'); hold off;
         
     end
 
