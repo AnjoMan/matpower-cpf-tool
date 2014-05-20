@@ -300,12 +300,6 @@ while i < max_iter
 
     
     if success % if correction converged we can save the point and do plotting/output in verbose mode
-        if verbose > 2
-            fprintf('\nVm_predicted\tVm_corrected\n');
-            [[abs(V_predicted);lambda_predicted] [abs(V);lambda]]
-        end
-
-        %% record data
         logStepResults()
         pointCnt = pointCnt + 1;
     end
@@ -433,12 +427,6 @@ while j < max_iter && ~finished
 
     
     if success %if correction step converged, log values and do verbosity
-        if verbose > 2
-            fprintf('\nVm_predicted\tVm_corrected\n');
-            [[abs(V_predicted);lambda_predicted] [abs(V);lambda]]
-        end
-
-        %% record data
 		logStepResults()
         pointCnt = pointCnt + 1;
     end
@@ -549,16 +537,9 @@ while k < max_iter && ~finished
     %%    if rcond(J) <= condNumThresh_Phase3 | success == false % Jacobian matrix is ill-conditioned, or correction step fails
     %% ...we use PV curve slopes as the criteria for switching modes
     
-    if success
-        if verbose > 2
-            fprintf('\nVm_predicted\tVm_corrected\n');
-            [[abs(V_predicted);lambda_predicted] [abs(V);lambda]]
-        end
-
-        %% record data
-		logStepResults()
-        pointCnt = pointCnt + 1;
-        
+    if success,
+        logStepResults()
+        pointCnt = pointCnt + 1;        
     end
     
     
@@ -585,13 +566,7 @@ if success, %assuming we didn't fail out, try to solve for lambda = 0
     
     [V, lambda, success, ~] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
     
-    if success
-        if verbose > 2
-            fprintf('\nVm_predicted\tVm_corrected\n');
-            [[abs(V_predicted);lambda_predicted] [abs(V);lambda]]
-        end
-
-        %% record data
+    if success,
         pointCnt = pointCnt + 1;
 		logStepResults()
     end
