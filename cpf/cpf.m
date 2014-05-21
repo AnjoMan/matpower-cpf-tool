@@ -1,4 +1,4 @@
-function [max_lambda, predicted_list, corrected_list, combined_list, success, et] = cpf(casedata, participation, sigmaForLambda, sigmaForVoltage, verbose)
+function [max_lambda, predicted_list, corrected_list, combined_list, success, et] = cpf(casedata, participation, sigmaForLambda, sigmaForVoltage, verbose, plotting)
 %CPF  Run continuation power flow (CPF) solver.
 %   [INPUT PARAMETERS]
 %   loadvarloc: load variation location(in external bus numbering). Single
@@ -90,6 +90,8 @@ if nargin < 3
 end
 
 if nargin < 5, verbose = 0; end
+if nargin < 6, shouldIPlotEverything = false; else shouldIPlotEverything = plotting; end
+
 
 if verbose, fprintf('CPF\n'); figure; end
 
@@ -106,10 +108,7 @@ slopeThresh_Phase2 = 0.3;       % PV curve slope shreshold for lambda prediction
 [baseMVA, busE, genE, branchE] = loadcase(casedata);
 [numBuses, ~] = size(busE);
 
-shouldIPlotEverything = false;
-whatBusShouldIPlot = min(size(busE, 1), 11);
 
-shouldIPlotEverything = true;
 
 if nargin < 2 %no participation factors so keep the current load profile
 	participation = busE(:,PD)./sum(busE(:,PD));
@@ -233,7 +232,7 @@ if verbose > 0, fprintf('Start Phase 1: voltage prediction-correction (lambda in
 
 %parametrize step size for Phase 1
 minStepSize = 0.01;
-maxStepSize = 2;
+maxStepSize = 1;
 
 stepSize = sigmaForLambda;
 stepSize = min(max(stepSize, minStepSize),maxStepSize);
@@ -258,10 +257,10 @@ while i < max_iter
            
     %% check prediction to make sure step is not too big so as to cause non-convergence    
     error_predicted = max(abs(V_predicted- V));
-    if ~success && error_predicted > 0.1
+    if error_predicted > maxStepSize && ~success %-> this is inappropriate since 'success' would be coming from previous correction step
         newStepSize = 0.8*stepSize; %cut down the step size to reduce the prediction error
         if newStepSize > minStepSize,
-            if verbose, fprintf('\t\tpredicted voltage change: %.2f. Step Size reduced from %.3f to %.3f\n', error_predicted, stepSize, newStepSize); end
+            if verbose, fprintf('\t\tPrediction step too large (voltage change of %.4f). Step Size reduced from %.5f to %.5f\n', error_predicted, stepSize, newStepSize); end
             stepSize = newStepSize;
             i = i-1;            
             continue;
@@ -272,13 +271,16 @@ while i < max_iter
     [V, lambda, success, ~] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 	
     % if voltage correction fails, reduce step size and try again
-    if success == false  && stepSize > minStepSize,		
-		stepSize = stepSize * 0.3;		
-		if verbose, fprintf('\t\tdidnt solve; changed stepsize to: %f\n', stepSize); end
-		i = i-1;
-		V = V_saved;
-		lambda = lambda_saved;
-		continue;
+    if success == false  && stepSize > minStepSize,
+        newStepSize = stepSize * 0.3;
+        if newStepSize > minStepSize,	
+            if verbose, fprintf('\t\tCorrection step didnt converge; changed stepsize from %.5f to: %.5f\n', stepSize, newStepSize); end
+            stepSize = newStepSize;
+            i = i-1;
+            V = V_saved;
+            lambda = lambda_saved;
+            continue;
+        end
     end
 
     
@@ -387,7 +389,22 @@ while j < max_iter && ~finished
   
 	
 	[V, lambda, success, ~] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, participation_i, ref, pv, pq, continuationBus);
-	
+% 	
+%     fprintf('Lambda error: %d
+    
+    if abs(lambda - lambda_saved) > maxStepSize, %reject if lambda step is too big
+        newStepSize = stepSize * 0.2;
+        if newStepSize > minStepSize,
+            if verbose, fprintf('\t\tLambda step too big; lambda step = %3f). Step size reduced from %.5f to %.5f\n', lambda-lambda_saved, stepSize, newStepSize); end
+            stepSize = newStepSize;
+            V = V_saved;
+            lambda = lambda_saved;
+            j = j-1;
+            continue;
+        end
+        
+    end
+    
     mean_step = mean( abs(V_predicted-V_saved));    
 	prediction_error = mean(abs(V-V_predicted)./abs(V));
     error_order = log(prediction_error/0.000001);
@@ -395,22 +412,22 @@ while j < max_iter && ~finished
     if ( mean_step > 0.00001 && ~success) % if we jumped too far and correction step didn't converge
         newStepSize = stepSize * 0.4;
         if newStepSize > minStepSize, %if we are not below min step-size threshold go back and try again with new stepSize
-            if verbose, fprintf('\t\tpredicted voltage change: %f. Step Size reduced from %.5f to %.5f\n', mean_step, stepSize, newStepSize); end
+            if verbose, fprintf('\t\tDid not converge; voltage step: %f pu. Step Size reduced from %.5f to %.5f\n', mean_step, stepSize, newStepSize); end
             stepSize = newStepSize;
             V = V_saved;
             lambda= lambda_saved;
             j =  j-1;
             continue;
         end
-
-    elseif abs(error_order) > 2 && prediction_error>0, %if we havent just dropped the stepSize, consider changing it to get a better error outcome
-%         newStepSize = stepSize - 0.1*log(prediction_error/0.000001); %adjust step size
-% 	proposedStepSize = min( max(stepSize - 0.03*log( mean(prediction_error)/0.0001), minStepSize), maxStepSize);
-
-        newStepSize = stepSize * 1.1;
+    end
+    
+    
+    
+    if abs(error_order) > 1.5 && prediction_error>0, %if we havent just dropped the stepSize, consider changing it to get a better error outcome
+        newStepSize = stepSize * (1 + 0.2*(error_order < 1) - 0.2*(error_order>1));
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         
-		if verbose, fprintf('\t\tmean prediction error: %.15f. changed stepsize from %.5f to %.5f\n', prediction_error, stepSize, newStepSize); end
+		if verbose && newStepSize ~= stepSize, fprintf('\t\tAdjusting step size from %.5f to %.5f; mean prediction error: %.15f.\n', stepSize, newStepSize, prediction_error); end
         stepSize = newStepSize;
 	end
 	
@@ -509,14 +526,16 @@ while k < max_iter && ~finished
     [V, lambda, success, ~] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 	
 
-    mean_error = mean( abs( V-V_predicted));
-    error_order = log(mean_error/0.001);
+    prediction_error = mean( abs( V-V_predicted));
+    error_order = log(prediction_error/0.001);
     
-    if abs(error_order) > 1 && mean(error)>0,
-        newStepSize = stepSize * (1 + 0.8*(error_order < 0) - (0.8*error_order>0));
+    if abs(error_order) > 1 && prediction_error>0,
+        newStepSize = stepSize * (1 + 0.8*(error_order < 1) - 0.8*(error_order>1));
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         
-		if verbose, fprintf('\t\tmean prediction error: %.15f. changed stepsize from %.5f to %.5f\n', mean_error, stepSize, newStepSize); end
+   		if verbose && newStepSize ~= stepSize, fprintf('\t\tAdjusting step size from %.5f to %.5f; mean prediction error: %.15f.\n', stepSize, newStepSize, prediction_error); end
+        
+% 		if verbose, fprintf('\t\tmean prediction error: %.15f. changed stepsize from %.5f to %.5f\n', mean_error, stepSize, newStepSize); end
         stepSize = newStepSize;
     end
    
@@ -579,7 +598,7 @@ if shouldIPlotEverything,
     figure;	
     
     hold on;      
-        plot(lambda_corr, abs(V_corr)); 
+        plot(lambda_corr, abs(V_corr(pq,:))); 
         maxL =plot([max_lambda, max_lambda], ylim,'LineStyle', '--','Color',[0.8,0.8,0.8]);  
 %         mText = text(max_lambda*0.85, 0.1, sprintf('Lambda: %3.2f',max_lambda), 'Color', [0.7,0.7,0.7]);
         
@@ -593,7 +612,7 @@ if shouldIPlotEverything,
     hold off;
     
     
-    title('PV curves for all buses.');
+    title('Power-Voltage curves for all PQ buses.');
     ylabel('Voltage (p.u.)')
     xlabel('Power (lambda load scaling factor)');
     
@@ -660,14 +679,14 @@ end
         
         pred=scatter(lambda_pr, abs(V_pr(bus,:)),'r'); hold off;
         
-        title(sprintf('PV curve for bus %d.', continuationBus));
+        title(sprintf('Power-Voltage curve for bus %d.', continuationBus));
         ylabel('Voltage (p.u.)')
         xlabel('Power (lambda load scaling factor)');
         ml = max(lambda_corr);
         ylims = ylim;
         
         ticks = get(gca, 'XTick');
-        ticks = ticks(abs(ticks - ml) > 0.5);
+        ticks = ticks(abs(ticks - ml) > 0.25);
         ticks = sort(unique([ticks round(ml*1000)/1000]));
         set(gca, 'XTick', ticks);
         hold on;
