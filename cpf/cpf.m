@@ -117,7 +117,7 @@ else
 	participation = participation(:);%(:) forces column vector
 
 	if length(participation) ~= numBuses, %improper number of participations given
-		if length(participation) == 1 && participation > 0 && isinteger(participation),%assume bus number is specified instead
+		if length(participation) == 1 && participation > 0,%assume bus number is specified instead
 			participation = (1:numBuses)'==participation;
 		else
 			if verbose, fprintf('\t[Info]\tParticipation Factors improperly specified.\n\t\t\tKeeping Current Loading Profile.\n'); end
