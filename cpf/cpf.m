@@ -126,6 +126,8 @@ else
 	end
 end
 
+%i2e is simply the bus ids stored in casedata.bus(:,1), so V_corr can be
+%outputted as is with rows corresponding to entries in casedata.bus
 [i2e, bus, gen, branch] = ext2int(busE, genE, branchE);
 e2i = sparse(max(i2e), 1);
 e2i(i2e) = (1:size(bus, 1))';

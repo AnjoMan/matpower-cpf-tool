@@ -117,7 +117,7 @@ else
 	participation = participation(:);%(:) forces column vector
 
 	if length(participation) ~= numBuses, %improper number of participations given
-		if length(participation) == 1 && participation > 0 && isinteger(participation),%assume bus number is specified instead
+		if length(participation) == 1 && participation > 0,%assume bus number is specified instead
 			participation = (1:numBuses)'==participation;
 		else
 			if verbose, fprintf('\t[Info]\tParticipation Factors improperly specified.\n\t\t\tKeeping Current Loading Profile.\n'); end
@@ -126,6 +126,7 @@ else
 	end
 end
 
+%i2e is simply the bus ids stored in casedxa
 [i2e, bus, gen, branch] = ext2int(busE, genE, branchE);
 e2i = sparse(max(i2e), 1);
 e2i(i2e) = (1:size(bus, 1))';
@@ -260,7 +261,7 @@ while i < max_iter
     if error_predicted > maxStepSize && ~success %-> this is inappropriate since 'success' would be coming from previous correction step
         newStepSize = 0.8*stepSize; %cut down the step size to reduce the prediction error
         if newStepSize > minStepSize,
-            if verbose, fprintf('\t\tpredicted voltage change: %.2f. Step Size reduced from %.3f to %.3f\n', error_predicted, stepSize, newStepSize); end
+            if verbose, fprintf('\t\tPrediction step too large (voltage change of %.4f). Step Size reduced from %.5f to %.5f\n', error_predicted, stepSize, newStepSize); end
             stepSize = newStepSize;
             i = i-1;            
             continue;
@@ -404,7 +405,7 @@ while j < max_iter && ~finished
         end
         
     end
-%     if abs(lambda-lambda_predicted) > 0.1, %reject if lambda error is too big
+    
     mean_step = mean( abs(V_predicted-V_saved));    
 	prediction_error = mean(abs(V-V_predicted)./abs(V));
     error_order = log(prediction_error/0.000001);
@@ -526,14 +527,16 @@ while k < max_iter && ~finished
     [V, lambda, success, ~] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 	
 
-    mean_error = mean( abs( V-V_predicted));
-    error_order = log(mean_error/0.001);
+    prediction_error = mean( abs( V-V_predicted));
+    error_order = log(prediction_error/0.001);
     
-    if abs(error_order) > 1 && mean(error)>0,
+    if abs(error_order) > 1 && prediction_error>0,
         newStepSize = stepSize * (1 + 0.8*(error_order < 1) - 0.8*(error_order>1));
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         
-		if verbose, fprintf('\t\tmean prediction error: %.15f. changed stepsize from %.5f to %.5f\n', mean_error, stepSize, newStepSize); end
+   		if verbose && newStepSize ~= stepSize, fprintf('\t\tAdjusting step size from %.5f to %.5f; mean prediction error: %.15f.\n', stepSize, newStepSize, prediction_error); end
+        
+% 		if verbose, fprintf('\t\tmean prediction error: %.15f. changed stepsize from %.5f to %.5f\n', mean_error, stepSize, newStepSize); end
         stepSize = newStepSize;
     end
    
