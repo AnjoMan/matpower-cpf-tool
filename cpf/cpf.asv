@@ -455,13 +455,12 @@ while j < max_iter && ~finished
     %    if rcond(J) >= condNumThresh_Phase2 | success == false % Jacobian matrix is good-conditioned, or correction step fails
     % ...we use PV curve slopes as the criteria for switching modes:
     if ~success || (slope < 0 && slope > -slopeThresh_Phase2),
-        if ~success,
-            % restore good data
-            V = V_saved;
-            lambda = lambda_saved;
-            j = j-1;
-        end
-        
+
+        % restore good data
+        V = V_saved;
+        lambda = lambda_saved;
+        j = j-1;
+
         %% ---change to voltage prediction-correction (lambda decreasing)
         if verbose > 0
 			if ~success, 
@@ -586,9 +585,8 @@ if success, %assuming we didn't fail out, try to solve for lambda = 0
     
     if success,        
 		logStepResults()
-        if shouldIPlotEverything, plotBusCurve(continuationBus); end
-        
         nPoints = nPoints + 1;
+        if shouldIPlotEverything, plotBusCurve(continuationBus); end
     end
 end
 
@@ -664,10 +662,9 @@ end
     
     function plotBusCurve(bus)
         
-%         for point = 1:length(lambda_corr),
-%             plot( [lambda_pr(point), lambda_corr(point)], [abs(V_pr(bus,point)),abs(V_corr(bus, point))], 'go');hold on;
-%         end
-% %         hold off;
+        for point = 1:length(lambda_corr),
+            plot( [lambda_corr
+        end
         %use backwards order so that earlier points end up on top
         
         %plot phase 3
