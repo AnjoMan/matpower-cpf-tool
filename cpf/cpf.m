@@ -193,12 +193,15 @@ V(gbus) = gen(on, VG) ./ abs(V(gbus)).* V(gbus);
 t0 = clock;
 
 nPoints = 0;
-V_pr=[];
-lambda_pr = [];
-V_corr = [];
-lambda_corr = [];
-correctionIters = []; 
-slopes = [];
+% V_pr=[];
+% lambda_pr = [];
+% V_corr = [];
+% lambda_corr = [];
+
+V_pr = zeros(size(bus,1), 400);
+V_corr = zeros(size(bus,1),400);
+lambda_pr = zeros(1,400);
+lambda_corr = zeros(1,400);
 
 
 
@@ -253,7 +256,7 @@ while i < max_iter
 	if nPoints<4, % do voltage prediction to find predicted point (predicting voltage)
 		[V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
     else %if we have enough points, use lagrange polynomial
-		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_corr, lambda, stepSize, ref, pv, pq);
+		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, ref, pv, pq);
     end
     
            
@@ -380,7 +383,7 @@ while j < max_iter && ~finished
 	if nPoints<4
         [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, [2, continuationBus], initQPratio, participation_i,flag_lambdaIncrease);
     else
-        [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr, lambda_corr, lambda, stepSize, continuationBus, ref, pv, pq);
+        [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, continuationBus, ref, pv, pq);
     end
    
     
@@ -522,18 +525,30 @@ while k < max_iter && ~finished
     V_saved = V;
     lambda_saved = lambda;
     
+    
     %% do voltage prediction to find predicted point (predicting voltage)
     [V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
-    
+
     %% do voltage correction to find corrected point
     [V, lambda, success, ~] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 	
-
+    mean_step = mean( abs(V-V_saved));        
+    if ( mean_step > 0.0001 && ~success) % if we jumped too far and correction step didn't converge
+        newStepSize = stepSize * 0.4;
+        if newStepSize > minStepSize, %if we are not below min step-size threshold go back and try again with new stepSize
+            if verbose, fprintf('\t\tDid not converge; voltage step: %f pu. Step Size reduced from %.5f to %.5f\n', mean_step, stepSize, newStepSize); end
+            stepSize = newStepSize;
+            V = V_saved;
+            lambda= lambda_saved;
+            k =  k-1;
+            continue;
+        end
+    end
     prediction_error = mean( abs( V-V_predicted));
     error_order = log(prediction_error/0.001);
     
     if abs(error_order) > 1 && prediction_error>0,
-        newStepSize = stepSize - 0.05*log(prediction_error/0.001); %adjust step size
+        newStepSize = stepSize - 0.03*log(prediction_error/0.001); %adjust step size
 
 %         newStepSize = stepSize * (1 + 0.8*(error_order < 1) - 0.8*(error_order>1));
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
@@ -546,6 +561,7 @@ while k < max_iter && ~finished
    
     if lambda < 0 % lambda is less than 0, then stop CPF simulation
         if verbose > 0, fprintf('\t[Info]:\tlambda is less than 0.\n\t\t\tCPF finished.\n'); end
+        k = k-1;
         break;
     end
     
@@ -594,6 +610,10 @@ end
 
 if verbose > 0, fprintf('\t[Info]:\t%d data points total.\n', nPoints); end
 
+V_corr = V_corr(:,1:nPoints);
+lambda_corr = lambda_corr(1:nPoints);
+V_pr = V_pr(:,1:nPoints);
+lambda_pr = lambda_pr(1:nPoints);
 
 max_lambda = max(lambda_corr);
 
@@ -601,6 +621,7 @@ max_lambda = max(lambda_corr);
 
 
 if shouldIPlotEverything, 
+    plotBusCurve(continuationBus);
     figure;	
     
     hold on;      
@@ -685,10 +706,13 @@ end
              
         if 1+i+j+k < nPoints,
             en=plot(lambda_corr(end-1:end), abs(V_corr(bus, end-1:end)),'.-k', 'markers', 12);
+            
+            scatter(lambda_pr(nPoints), abs(V_pr(bus, nPoints)), 'r');
         end
 %         fprintf('Points in 1, Phase 1, Phase 2, Phase 3: %d. Total Points: %d',1+i+j+k, pointCnt)
         
-        pred=scatter(lambda_pr(1:nPoints+1), abs(V_pr(bus,1:nPoints+1)),'r'); hold off;
+        pred=scatter(lambda_pr(1:1+i+j+k), abs(V_pr(bus,1:1+i+j+k)),'r'); hold off;
+        
         
         title(sprintf('Power-Voltage curve for bus %d.', continuationBus));
         ylabel('Voltage (p.u.)')

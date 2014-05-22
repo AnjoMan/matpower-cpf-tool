@@ -3,7 +3,7 @@ function test_cpf()% close all; clear all; clc
     
     base = loadcase('case30_mod');
     faults = defineFaults(base,1);
-    mFault = faults{5};
+    mFault = faults{2};
     myCase = mFault.applyto(base);
 
 
