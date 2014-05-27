@@ -80,7 +80,7 @@ GEN_BUS = 1;
 VG = 6;
 GEN_STATUS = 8;
 
-
+GLOBAL_CONTBUS = 0; %for use by 'plotBusCurve'
 
 lastwarn('No Warning');
 %% assign default parameters
@@ -364,9 +364,10 @@ if verbose > 0
     fprintf('Switch to Phase 2: lambda prediction-correction (voltage decreasing).\n');
 end
 
+pqWhiteList = true(length(pq),1);
 
 maxStepSize = 0.1;
-minStepSize = 0.0001;
+minStepSize = 0.000001;
 stepSize = sigmaForVoltage;
 stepSize = min(max(stepSize, minStepSize),maxStepSize);
 j = 0;
@@ -398,9 +399,13 @@ while j < max_iter && ~finished
 %     fprintf('Lambda error: %d
     
     if abs(lambda - lambda_saved) > maxStepSize, %reject if lambda step is too big
+        if abs(lambda-lambda_saved) > 1 && pqWhiteList(continuationBus), 
+            pqWhiteList(continuationBus) = false;
+            fprintf('Bus %d blacklisted\n', continuationBus); 
+        end %blacklist busses that cause gross changes in lambda
         newStepSize = stepSize * 0.2;
         if newStepSize > minStepSize,
-            if verbose, fprintf('\t\tLambda step too big; lambda step = %3f). Step size reduced from %.5f to %.5f\n', lambda-lambda_saved, stepSize, newStepSize); end
+            if verbose, fprintf('\t\tLambda step too big; lambda step = %3f). Step size reduced from %.6f to %.6f\n', lambda-lambda_saved, stepSize, newStepSize); end
             stepSize = newStepSize;
             V = V_saved;
             lambda = lambda_saved;
@@ -412,12 +417,12 @@ while j < max_iter && ~finished
     
     mean_step = mean( abs(V_predicted-V_saved));    
 	prediction_error = mean(abs(V-V_predicted)./abs(V));
-    error_order = log(prediction_error/0.000001);
+    error_order = log(prediction_error/0.00001);
     
     if ( mean_step > 0.00001 && ~success) % if we jumped too far and correction step didn't converge
         newStepSize = stepSize * 0.4;
         if newStepSize > minStepSize, %if we are not below min step-size threshold go back and try again with new stepSize
-            if verbose, fprintf('\t\tDid not converge; voltage step: %f pu. Step Size reduced from %.5f to %.5f\n', mean_step, stepSize, newStepSize); end
+            if verbose, fprintf('\t\tDid not converge; voltage step: %f pu. Step Size reduced from %.6f to %.6f\n', mean_step, stepSize, newStepSize); end
             stepSize = newStepSize;
             V = V_saved;
             lambda= lambda_saved;
@@ -432,7 +437,10 @@ while j < max_iter && ~finished
         newStepSize = stepSize * (1 + 0.2*(error_order < 1) - 0.2*(error_order>1));
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         
-		if verbose && newStepSize ~= stepSize, fprintf('\t\tAdjusting step size from %.5f to %.5f; mean prediction error: %.15f.\n', stepSize, newStepSize, prediction_error); end
+		if verbose && newStepSize ~= stepSize, fprintf('\t\tAdjusting step size from %.6f to %.6f; mean prediction error: %.15f.\n', stepSize, newStepSize, prediction_error); end
+        if newStepSize < 0.000001,
+            keyboard
+        end
         stepSize = newStepSize;
 	end
 	
@@ -440,10 +448,20 @@ while j < max_iter && ~finished
 
     %% calculate slope (dP/dLambda) at current point
     mSlopes = abs(V-V_saved)./(lambda-lambda_saved);
-    [~,continuationBusPQ] = max(abs(mSlopes(pq))); %limit to only PQ busses
+%     mSlopes = abs(V-V_corr(:,1))./(lambda-lambda_saved);
+
+    if flag_lambdaIncrease && any(mSlopes < 0),
+        flag_lambdaIncrease = false;
+        keyboard;
+    end
+    [~,continuationBusPQ] = max((-1*flag_lambdaIncrease) *mSlopes(pq(pqWhiteList))); %limit to only PQ busses
+%     [~,continuationBusPQ] = mymedian(mSlopes(pq)); %limit to only PQ busses
+
     continuationBus = pq(continuationBusPQ);
     slope = mSlopes(continuationBus);
-
+    
+    continuationBus = 7;
+%     fprintf('slope: %d', slope);
     
     if success %if correction step converged, log values and do verbosity
 		logStepResults();        
@@ -685,12 +703,13 @@ end
     
     function plotBusCurve(bus)
         
-%         for point = 1:length(lambda_corr),
-%             plot( [lambda_pr(point), lambda_corr(point)], [abs(V_pr(bus,point)),abs(V_corr(bus, point))], 'go');hold on;
-%         end
-% %         hold off;
-        %use backwards order so that earlier points end up on top
-        
+        if bus == GLOBAL_CONTBUS, %if its the same bus as last time, check resizing of window.
+            xlims = xlim;
+            ylims = ylim;
+
+            xlims(2) = max(xlims(1) + (lambda_corr(nPoints)- xlims(1)) * 1.2, xlims(2));
+            ylims(1) = min(ylims(2) - (ylims(2) - abs(V_corr(bus,nPoints)))*1.2, ylims(1));
+        end
         %plot phase 3
         p3=plot(lambda_corr(1+i+j:1+i+j+k), abs(V_corr(bus, 1+i+j:1+i+j+k)), '.-b', 'markers',12); hold on;
         
@@ -718,19 +737,45 @@ end
         ylabel('Voltage (p.u.)')
         xlabel('Power (lambda load scaling factor)');
         ml = max(lambda_corr);
-        ylims = ylim;
         
         ticks = get(gca, 'XTick');
         ticks = ticks(abs(ticks - ml) > 0.25);
         ticks = sort(unique([ticks round(ml*1000)/1000]));
         set(gca, 'XTick', ticks);
         hold on;
-            mLine=plot( [ml, ml], ylims, 'LineStyle', '--', 'Color', [0.8,0.8,0.8]);
+            mLine=plot( [ml, ml], ylim, 'LineStyle', '--', 'Color', [0.8,0.8,0.8]);
             uistack(mLine, 'bottom');
         hold off;
         legend([pred, p1,p2, mLine], {'Predicted Values', 'Lambda Continuation', 'Voltage Continuation', 'Max Lambda'})
-     
+        
+        if bus == GLOBAL_CONTBUS,
+            xlim(xlims);
+            ylim(ylims);
+            
+        end
+        
+        GLOBAL_CONTBUS = bus;
+        a = 1;
     end
+
+function [med, idx] =mymedian(x)
+% mymedian    Calculate the median value of an array and find its index.
+%
+% This function can be used to calculate the median value of an array.
+% Unlike the built in median function, it returns the index where the
+% median value occurs. In cases where the array does not contain its
+% median, such as [1,2,3,4] or [1,3,2,4], the index of the first occuring
+% adjacent point will be returned; in both of the above examples the median
+% will be 2.5 and the index will be 2.
+
+    assert(isvector(x));
+    
+    
+    med = median(x);
+    
+    [~, idx] = min( abs( x - med));
+end
+
 
 
 end

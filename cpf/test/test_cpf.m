@@ -3,7 +3,8 @@ function test_cpf()% close all; clear all; clc
     
     base = loadcase('case30_mod');
     faults = defineFaults(base,1);
-    mFault = faults{2};
+    mFault = faults{9};
+%     mFault = faults{2};
     myCase = mFault.applyto(base);
 
 
@@ -18,4 +19,27 @@ function test_cpf()% close all; clear all; clc
     
     
     
+
+    %%time test:
+%     times = [];
+%     fprintf('__________|\n');
+%     indices = randi([1,length(faults)], 10,1);
+%     for i = indices(:)'
+%        mFault = faults{i};
+%        
+%        myCase = mFault.applyto(base);
+%        myCase = myCase{1};
+%        
+%        tic;
+%        out = cpf(myCase,-1,5,0.025);
+%        time = toc;
+%        
+%        times = [times out.time];
+%        fprintf('.');
+%     end
+%     
+%     fprintf('\nAvg computation time: %f\n', mean(times));
+%     for i = 1:length(indices),
+%        fprintf('Fault %d: %f seconds\n', indices(i), times(i)); 
+%     end
 end
