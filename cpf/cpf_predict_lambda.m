@@ -1,6 +1,6 @@
-function [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr, lambda_corr, lambda, sigma, continuationBus, ref,pv, pq, order)
+function [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr, lambda_corr, lambda, sigma, continuationBus, ref,pv, pq, maxDegree)
 
-    if nargin < 9, order = 10; end
+    if nargin < 9, maxDegree = 6; end
 
 %     if lambda > 1.79, keyboard; end
 	
@@ -18,7 +18,7 @@ function [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr, lambda_cor
 	
 	%% update lambda
 	
-	maxDegree = 4;
+%  	maxDegree = 4;
 		% degree of Lagrange polynomial is set by length of known data, too
 		% high a degree causes instability
 	 

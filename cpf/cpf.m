@@ -141,7 +141,13 @@ participation_i = participation_i ./ sum(participation_i); %normalize
 %% get bus index lists of each type of bus
 [ref, pv, pq] = bustypes(bus, gen);
 
-
+if isempty(ref) | isempty(pv) | isempty(pq),
+   if isempty(ref),  mError = addCause(mError, MException('MATPOWER:bustypes',  'No ref bus returned')); end   
+   if isempty(pv),  mError = addCause(mError, MException('MATPOWER:bustypes',  'No pv buses returned')); end   
+   if isempty(pq),  mError = addCause(mError, MException('MATPOWER:bustypes',  'No pq bus returned')); end
+   
+   throw(mError);
+end
 
 if any(isnan(participation_i)), %could happen if no busses had loads
 	participation_i = zeros(length(participation_i), 1);
@@ -239,7 +245,7 @@ lagrange_order = 6;
 
 %parametrize step size for Phase 1
 minStepSize = 0.01;
-maxStepSize = 1;
+maxStepSize = 10;
 
 stepSize = sigmaForLambda;
 stepSize = min(max(stepSize, minStepSize),maxStepSize);
@@ -259,7 +265,7 @@ while i < max_iter
     V_saved = V;
     lambda_saved = lambda;
     
-	if nPoints<4 || any( abs(mean_log(stepSizes(end-lagrange_order:end)) > 1)), % do voltage prediction to find predicted point (predicting voltage)
+	if nPoints<4 || any( abs(mean_log(stepSizes(end-lagrange_order:end)) > 1)) || slope < 1e-10, % do voltage prediction to find predicted point (predicting voltage)
 		[V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
     else %if we have enough points, use lagrange polynomial
 		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, ref, pv, pq, lagrange_order);
@@ -387,10 +393,16 @@ while j < max_iter && ~finished
     
     
     %% do lambda prediction to find predicted point (predicting lambda)
-	if nPoints<4 || any( abs(mean_log(stepSizes(end-lagrange_order:end)) > 1)),
+	if nPoints<4 || any( abs(mean_log(stepSizes(end-lagrange_order:end)) > 1)) || slope < 1e-10,
         [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, [2, continuationBus], initQPratio, participation_i,flag_lambdaIncrease);
     else
-        [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, continuationBus, ref, pv, pq, 4);
+        try
+            [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, continuationBus, ref, pv, pq, lagrange_order);
+        catch
+            keyboard
+            [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, continuationBus, ref, pv, pq, lagrange_order);
+
+        end
     end
    
     
@@ -535,6 +547,7 @@ end
 
 
 function continuationBus = pickBus()
+%     if length(pq) 
     %how to pick the continuation bus during Phase 2:
     
     % 1. calculate slope (dP/dLambda) at current point

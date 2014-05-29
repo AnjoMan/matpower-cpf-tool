@@ -22,7 +22,7 @@ function [V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_co
 	%% update lambda
 	lambda_predicted = lambda + sigma;
 	
-	maxDegree = 10;
+% 	maxDegree = 10;
 		
 	 
 	 
