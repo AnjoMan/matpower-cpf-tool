@@ -2,9 +2,12 @@ function test_cpf()% close all; clear all; clc
     close all;
     
     base = loadcase('case30_mod');
-    faults = defineFaults(base,1);
-    mFault = faults{9};
+    faults = defineFaults(base);
+    mFault = faults{52};
 %     mFault = faults{2};
+
+
+    mFault = Fault('dual', {[1,27],[],[],[]});
     myCase = mFault.applyto(base);
 
 

@@ -1,6 +1,6 @@
-function [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr, lambda_corr, lambda, sigma, continuationBus, ref,pv, pq)
+function [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr, lambda_corr, lambda, sigma, continuationBus, ref,pv, pq, order)
 
-
+    if nargin < 9, order = 10; end
 
 %     if lambda > 1.79, keyboard; end
 	
@@ -8,6 +8,7 @@ function [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr, lambda_cor
 	npv = length(pv);
 	npq = length(pq);
 	
+    
 	
 	Vangles_pv = 1:npv;
 	Vangles_pq = npv+1:npv+npq;

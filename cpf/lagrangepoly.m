@@ -1,6 +1,8 @@
 function   Lx = lagrangepoly(x, xs, ys)
 	% lagrangepoly	Extrapolate/Interpolate functions using lagrange polynomial.
 	%
+    % Lx = lagrangepoly(x,xs,ys);
+    %
 	% This function uses the lagrange polynomial formulation to perform interpolation
 	% or extrapolation via polynomial. It works by returning y = L(x), where L represents the lagrange 
 	% polynomial derived from x,xs and ys. The order of the polynomial is

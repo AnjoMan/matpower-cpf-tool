@@ -1,7 +1,11 @@
-function [V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_corr, lambda, sigma, ref,pv, pq)
+function [V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_corr, lambda, sigma, ref,pv, pq,maxDegree)
 
-
-
+    
+    if nargin < 8,
+        maxDegree = 6;
+    end
+    % degree of Lagrange polynomial is set by length of known data, too
+		% high a degree causes instability
 
 	
 	%% set up indexing
@@ -19,8 +23,7 @@ function [V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_co
 	lambda_predicted = lambda + sigma;
 	
 	maxDegree = 10;
-		% degree of Lagrange polynomial is set by length of known data, too
-		% high a degree causes instability
+		
 	 
 	 
 	V_corr =  V_corr(:, max(1,end-maxDegree+1):end);
