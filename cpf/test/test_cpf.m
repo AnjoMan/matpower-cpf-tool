@@ -2,17 +2,17 @@ function test_cpf()% close all; clear all; clc
     close all;
     
     base = loadcase('case118_mod');
-%     faults = defineFaults(base);
-%     mFault = faults{52};
-%     mFault = faults{2};
+%     base = loadcase('case30_mod');
+%     faults = defineFaults(base,2);
+%     mFault = faults{17743};
 
-
-    mFault = Fault('dual', {[112],[70],[],[]});
+    
+    mFault = Fault('dual', {[65,128],[],[],[]});
     myCases = mFault.applyto(base);
 
 
     myCase = myCases{1};
-    myCase = myCases{2};
+%     myCase = myCases{2};
 
 
 

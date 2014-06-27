@@ -68,7 +68,11 @@ function [V_predicted, lambda_predicted, J, success] = cpf_predict(Ybus, ref, pv
 			e(npv+2*npq+1) = -1 + 2*(flag_lambdaIncrease == true);	
 		case 2, %predict lambda
 			%each bus has an angle, plus all PQ busses have a Voltage
-			continuationBus = type_predict(2);%% [Anton] used type_predict to pass in bus value I want for voltage continuation
+%             try,
+                continuationBus = type_predict(2);%% [Anton] used type_predict to pass in bus value I want for voltage continuation
+%             catch
+%                 keyboard
+%             end
 
 			e(npv + find(pq == continuationBus)) = -1;
 			e(pv==continuationBus) = -1;
