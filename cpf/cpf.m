@@ -1,4 +1,4 @@
-function [max_lambda, predicted_list, corrected_list, combined_list, success, et] = cpf(casedata, participation, sigmaForLambda, sigmaForVoltage, verbose, plotting)
+function [max_lambda, predicted_list, corrected_list, combined_list, success, et] = cpf(casedata, participation, sigmaForLambda, sigmaForVoltage, verbose, plotting, do_phase3)
 %CPF  Run continuation power flow (CPF) solver.
 %   [INPUT PARAMETERS]
 %   loadvarloc: load variation location(in external bus numbering). Single
@@ -91,7 +91,7 @@ end
 
 if nargin < 5, verbose = 0; end
 if nargin < 6, shouldIPlotEverything = false; else shouldIPlotEverything = plotting; end
-
+if nargin < 7, do_phase3 = true; end
 
 if verbose, fprintf('CPF\n'); figure; end
 
@@ -147,7 +147,12 @@ if isempty(ref) | isempty(pv) | isempty(pq),
 %    if isempty(pq),  mError = addCause(mError, MException('MATPOWER:bustypes',  'No pq bus returned')); end
 %    
 %    throw(mError);
-    if isempty(pq), useLagrange = false; end
+    if isempty(pq), 
+        useLagrange = false; 
+        continuationBus = pv(1);
+    end
+else
+    continuationBus = pq(1);    
 end
 
 if any(isnan(participation_i)), %could happen if no busses had loads
@@ -255,10 +260,10 @@ minStepSize = 0.01;
 maxStepSize = 10;
 
 stepSize = sigmaForLambda;
+stepSize = 10;
 stepSize = min(max(stepSize, minStepSize),maxStepSize);
 
 finished = false;
-continuationBus = pq(1);
 
 function y= mean_log(x)
     y = log(x./mean(x));
@@ -373,7 +378,7 @@ end
 
 
 if i < 1,
-    mError = addCause(mError, MException('CPF:Phase 1', 'no points in phase 1'));
+    mError = addCause(mError, MException('CPF:Phase1', 'no points in phase 1'));
 end
 
 
@@ -592,6 +597,8 @@ minStepSize = 0.9*stepSize;
 maxStepSize = 2;
 stepSize = min(max(stepSize, minStepSize),maxStepSize);
 
+if ~do_phase3, finished = true; end
+
 k = 0;
 while k < max_iter && ~finished
     %% update iteration counter
@@ -624,8 +631,9 @@ while k < max_iter && ~finished
     prediction_error = mean( abs( V-V_predicted));
     error_order = log(prediction_error/0.001);
     
-    if abs(error_order) > 1 && prediction_error>0,
-        newStepSize = stepSize - 0.03*log(prediction_error/0.001); %adjust step size
+    if abs(error_order) > 0.8 && prediction_error>0,
+%         newStepSize = stepSize - 0.03*log(prediction_error/0.001); %adjust step size
+        newStepSize = stepSize - 0.15*log(prediction_error/0.001); %adjust step size
 
 %         newStepSize = stepSize * (1 + 0.8*(error_order < 1) - 0.8*(error_order>1));
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
@@ -673,7 +681,7 @@ if verbose > 0, fprintf('\t[Info]:\t%d data points contained in phase 3.\n', k);
 
 
 %% Get the last point (Lambda == 0)
-if success, %assuming we didn't fail out, try to solve for lambda = 0
+if success && do_phase3, %assuming we didn't fail out, try to solve for lambda = 0
     [V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda_saved, lambda_saved, 1, initQPratio, participation_i, flag_lambdaIncrease);
     [V, lambda, success, iters] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
     
@@ -691,10 +699,12 @@ V_corr = V_corr(:,1:nPoints);
 lambda_corr = lambda_corr(1:nPoints);
 V_pr = V_pr(:,1:nPoints);
 lambda_pr = lambda_pr(1:nPoints);
-
+nSteps = nSteps(1:nPoints);
 max_lambda = max(lambda_corr);
 
-
+if lambda < max_lambda,
+    success = true;
+end
 
 
 if shouldIPlotEverything, 
