@@ -141,18 +141,18 @@ useLagrange=true;
 %% get bus index lists of each type of bus
 [ref, pv, pq] = bustypes(bus, gen);
 
-if isempty(ref) | isempty(pv) | isempty(pq),
-   if isempty(ref),  mError = addCause(mError, MException('MATPOWER:bustypes',  'No ref bus returned')); end   
-%    if isempty(pv),  mError = addCause(mError, MException('MATPOWER:bustypes',  'No pv buses returned')); end   
-%    if isempty(pq),  mError = addCause(mError, MException('MATPOWER:bustypes',  'No pq bus returned')); end
-%    
-%    throw(mError);
-    if isempty(pq), 
-        useLagrange = false; 
-        continuationBus = pv(1);
-    end
+if isempty(ref),
+   mError = addCause(mError, mException('MATPOWER:bystypes', 'No ref bus returned'));
+   finished = true;
+   max_lambda = 0;
+   lambda = 0;
+end
+
+if isempty(pq),
+    useLagrange = false;
+    continuationBus = pv(1);
 else
-    continuationBus = pq(1);    
+    continuationBus = pq(1);
 end
 
 if any(isnan(participation_i)), %could happen if no busses had loads
@@ -333,7 +333,7 @@ while i < max_iter
     
     if success % if correction converged we can save the point and do plotting/output in verbose mode
         logStepResults();        
-		if shouldIPlotEverything, plotBusCurve(continuationBus); end
+		if verbose && shouldIPlotEverything, plotBusCurve(continuationBus); end
         nPoints = nPoints + 1;
     end
     
@@ -392,6 +392,7 @@ if verbose > 0
 end
 
 busWhiteList = true(size(bus,1),1);
+p2_avoidLagrange = false;
 
 maxStepSize = 0.1;
 minStepSize = 0.000001;
@@ -408,13 +409,23 @@ while j < max_iter && ~finished
     
     
     %% do lambda prediction to find predicted point (predicting lambda)
-	if ~useLagrange  || (nPoints<4 || any( abs(mean_log([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize])) > 1) || slope < 1e-10),
+	if ~useLagrange  || p2_avoidLagrange || (nPoints<4 || any( abs(mean_log([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize])) > 0.75) || slope < 1e-10),
         [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, [2, continuationBus], initQPratio, participation_i,flag_lambdaIncrease);
+%         usedLagrange = false;
     else
         [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, continuationBus, ref, pv, pq, lagrange_order);
+%         usedLagrange = true;
     end
    
-    
+	if abs(lambda_predicted - lambda) > maxStepSize || lambda_predicted < 0,
+        stepSize = stepSize * 0.8;
+        if abs(lambda_predicted - lambda) > 10*maxStepSize,
+            p2_avoidLagrange = true;
+        end
+        j = j-1;
+        continue;
+        
+	end
     
     %% do lambda correction to find corrected point
     Vm_assigned = abs(V_predicted);
@@ -426,6 +437,12 @@ while j < max_iter && ~finished
 %     fprintf('Lambda error: %d
     
     if abs(lambda - lambda_saved) > maxStepSize, 
+%         if usedLagrange, 
+%             lagrangeFails = lagrangeFails+1;
+% %             if lagrangeFails
+%         else
+%             lagrangeFails = 0;
+%         end
         %reject the new sample if lambda step is too big - this can happen
         %for certain buses. If it does happen, we can try reducing the step
         %size, discarding the sample and running the step again.
@@ -507,7 +524,7 @@ while j < max_iter && ~finished
     
     if success %if correction step converged, log values and do verbosity
 		logStepResults();        
-		if shouldIPlotEverything, plotBusCurve(continuationBus); end
+		if verbose && shouldIPlotEverything, plotBusCurve(continuationBus); end
         nPoints = nPoints + 1;
     end
     
@@ -596,7 +613,7 @@ flag_lambdaIncrease = false;
 minStepSize = 0.9*stepSize;
 maxStepSize = 2;
 stepSize = min(max(stepSize, minStepSize),maxStepSize);
-
+stepSize = lambda_saved - lambda;
 if ~do_phase3, finished = true; end
 
 k = 0;
@@ -609,9 +626,14 @@ while k < max_iter && ~finished
     V_saved = V;
     lambda_saved = lambda;
     
+    if  ~useLagrange || (nPoints<4 || any( abs(mean_log([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize])) > 1) || slope < 1e-10), % do voltage prediction to find predicted point (predicting voltage)
+		[V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
+    else %if we have enough points, use lagrange polynomial
+		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, ref, pv, pq, lagrange_order);
+    end
     
-    %% do voltage prediction to find predicted point (predicting voltage)
-    [V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
+%     %% do voltage prediction to find predicted point (predicting voltage)
+%     [V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
 
     %% do voltage correction to find corrected point
     [V, lambda, success, iters] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
@@ -633,7 +655,7 @@ while k < max_iter && ~finished
     
     if abs(error_order) > 0.8 && prediction_error>0,
 %         newStepSize = stepSize - 0.03*log(prediction_error/0.001); %adjust step size
-        newStepSize = stepSize - 0.15*log(prediction_error/0.001); %adjust step size
+        newStepSize = stepSize - 0.03*log(prediction_error/0.001); %adjust step size
 
 %         newStepSize = stepSize * (1 + 0.8*(error_order < 1) - 0.8*(error_order>1));
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
@@ -653,7 +675,7 @@ while k < max_iter && ~finished
     
     if success,
         logStepResults()        
-		if shouldIPlotEverything, plotBusCurve(continuationBus); end
+		if verbose && shouldIPlotEverything, plotBusCurve(continuationBus); end
         nPoints = nPoints + 1;        
     end
     
@@ -693,18 +715,20 @@ if success && do_phase3, %assuming we didn't fail out, try to solve for lambda =
     end
 end
 
-if verbose > 0, fprintf('\t[Info]:\t%d data points total.\n', nPoints); end
+if verbose > 0, fprintf('\n\t[Info]:\t%d data points total.\n', nPoints); end
 
 V_corr = V_corr(:,1:nPoints);
 lambda_corr = lambda_corr(1:nPoints);
 V_pr = V_pr(:,1:nPoints);
 lambda_pr = lambda_pr(1:nPoints);
 nSteps = nSteps(1:nPoints);
+stepSizes = stepSizes(1:nPoints);
 max_lambda = max(lambda_corr);
 
 if lambda < max_lambda,
     success = true;
 end
+
 
 
 if shouldIPlotEverything, 
@@ -736,7 +760,11 @@ if shouldIPlotEverything,
 end
 et = etime(clock, t0);
 
-
+if verbose > 0, 
+    fprintf('\t[Info]:\tAverage step size: %.6f\n', mean(stepSizes));
+    fprintf('\t[Info]:\tAverage # iterations: %.2f\n', mean(nSteps)); 
+    fprintf('\t[Info]:\tCompletion time: %.3f seconds.\n', et); 
+end
 %% reorder according to exterior bus numbering
 
 if nargout > 1, % LEGACY create predicted, corrected, combined lists
