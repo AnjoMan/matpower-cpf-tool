@@ -4,19 +4,18 @@ function test_cpf()% close all; clear all; clc
     base = loadcase('case118_mod');
 %     base = loadcase('case30_mod');
 %     faults = defineFaults(base,2);
-%     mFault = faults{23024};
+%     mFault = faults{20509};
 
-%         mFault = Fault('dual', {[],[10,15],[],[]});
 
-    mFault = Fault('dual', {[],[100,105],[],[]});
-    myCases = mFault.applyto(base);
+    mFault = Fault('dual', {[18],[68],[],[]});
+    myCases = mFault.applyto(base, true, false);
 
 
     myCase = myCases{1};
 %     myCase = myCases{2};
 
 
-    out = cpf(myCase,-1,5,0.025,false, true, true)
+    out = cpf(myCase,-1,5,0.025,true, true, true)
     
 %     out = cpf(base, 7, 5, 0.025, true, true)
 %     [max_lambda, predicted, corrected, combined] = cpf(myCase, -1, 5,0.025,true);

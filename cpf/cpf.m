@@ -71,9 +71,15 @@ if nargin == 0 % run test suite
     return;
 end
 
+
+
+
+finished = false;
+
 BUS_I = 1;
 PD = 3;
 QD = 4;
+VD = 8;
 VA = 9;
 
 GEN_BUS = 1;
@@ -136,21 +142,56 @@ participation_i = participation(e2i(i2e));
 participation_i = participation_i ./ sum(participation_i); %normalize
 
 
+
+
+
+%specify whether or not to use lagrange polynomial interpolation when
+%possible; default is true
 useLagrange=true;
-	
+
+
+
+
 %% get bus index lists of each type of bus
 [ref, pv, pq] = bustypes(bus, gen);
 
-if isempty(ref),
-   mError = addCause(mError, mException('MATPOWER:bystypes', 'No ref bus returned'));
-   finished = true;
-   max_lambda = 0;
-   lambda = 0;
+
+%define a default result to return if we fail out before running any
+%computations
+    defaultResults.max_lambda = sum( bus(:,PD) )/ baseMVA; % set so that power calculation will return sum(bus(:,PD));
+    defaultResults.V_corr = [];
+    defaultResults.V_pr = [];
+    defaultResults.lambda_corr = [];
+    defaultResults.lambda_pr =[];
+    defaultResults.success=false;
+    defaultResults.time = 0;
+    
+%% GO THROUGH CONDITIONS FOR ABORTING  
+if nnz(participation_i) < 2,
+    %in this situation voltage won't droop and we get a bad computation.
+    %instead returns lambda to give current power as the maximum. This is
+    %under-stating the max loadability but hopefully not by too much.
+    %Requires a reasonable starting power value
+    
+    defaultResults.success = true;
+    max_lambda = defaultResults;
+    return;
+end
+    
+    
+if isempty(ref), %if no reference bus is returned, throw an error
+   mError = addCause(mError, mException('MATPOWER:bustypes', 'No ref bus returned'));
+   throw(mError);
 end
 
-if isempty(pq),
-    useLagrange = false;
-    continuationBus = pv(1);
+if isempty(pq) && isempty(pv),
+   mError = addCause(mError, mException('MATPOWER:bustypes', 'NO PV or PQ buses returned; network is trivial'));
+   throw(mError);
+end
+if isempty(pq), %if there is no PQ bus, all voltages are set by generators and we cannot run CPF.
+    defaultResults.success = true;
+    max_lambda = defaultResults;
+    return;
 else
     continuationBus = pq(1);
 end
@@ -188,12 +229,7 @@ end
 
 
 
-lambda0 = 0; %changed from 2 -> 0 
-lambda = lambda0;
-Vm = ones(size(bus, 1), 1);          %% flat start
-Va = bus(ref(1), VA) * Vm;
-V  = Vm .* exp(1i* pi/180 * Va);
-V(gbus) = gen(on, VG) ./ abs(V(gbus)).* V(gbus);
+
 
 
 
@@ -222,20 +258,54 @@ stepSizes = zeros(1,400);
 
 
 %% do voltage correction (ie, power flow) to get initial voltage profile
-lambda_predicted = lambda;
-V_predicted = V;
-[V, lambda, success, iters] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
+if ~finished,
+    
+    % first try solving for a flat start: 0 power, all voltages 1 p.u.
+    lambda0 = 0;
+    lambda = lambda0;
+    Vm = ones(size(bus, 1), 1);          %% flat start
+    Va = bus(ref(1), VA) * Vm;
+    V  = Vm .* exp(1i* pi/180 * Va);
+    V(gbus) = gen(on, VG) ./ abs(V(gbus)).* V(gbus);
+    
+    
+    lambda_predicted = lambda;
+    V_predicted = V;
+    [V, lambda, success, iters] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
+    
+    
+    
+    
+    if ~success, 
+       % If flat start fails, try with voltages, angles and powers from
+       % input case
+        Vm = bus(:,VD); %get bus voltages from case
+        Va = bus(:,VA); %get bus angles from case
+        V  = Vm .* exp(1i* pi/180 * Va);
+        V(gbus) = gen(on, VG) ./ abs(V(gbus)).* V(gbus);
+        
+        lambda = sum(bus(:,PD)) / baseMVA; %get lambda value that will give bus(:,PD) in cpf_correctVoltage(..) below
+        lambda_predicted = lambda;
+        [V, lambda, success, iters] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
+    end
+    
+    
+    if success == false,
+        mError = addCause(mError, MException('CPF:correctVoltageError', 'Could not solve for initial point'));
+        throw(mError);
+    end
 
+    if any(isnan(V))
+        mError = addCause(mError,MException('CPF:correctVoltageError', 'Generating initial voltage profile'));
+        mError = addCause(mError,MException('CPF:correctVoltageError', ['NaN bus voltage at ', mat2str(i2e(isnan(V)))]));    
+        throw(mError);
+    end
 
-if any(isnan(V))
-    mError = addCause(mError,MException('CPF:correctVoltageError', 'Generating initial voltage profile'));
-    mError = addCause(mError,MException('CPF:correctVoltageError', ['NaN bus voltage at ', mat2str(i2e(isnan(V)))]));    
-    throw(mError);
+    stepSize = 1;
+    logStepResults();
+    nPoints = nPoints + 1;
 end
 
-stepSize = 1;
-logStepResults();
-nPoints = nPoints + 1;
 
 
 
@@ -243,12 +313,6 @@ nPoints = nPoints + 1;
 
 
 
-
-
-
-%use lagrange interpolation or first-order approximation
-% useLagrange = true;
-% useLagrange = false;
 
 %% --- Start Phase 1: voltage prediction-correction (lambda increasing)
 if verbose > 0, fprintf('Start Phase 1: voltage prediction-correction (lambda increasing).\n'); end
@@ -257,20 +321,19 @@ lagrange_order = 6;
 
 %parametrize step size for Phase 1
 minStepSize = 0.01;
-maxStepSize = 10;
+maxStepSize = 200;
 
 stepSize = sigmaForLambda;
 stepSize = 10;
 stepSize = min(max(stepSize, minStepSize),maxStepSize);
 
-finished = false;
 
 function y= mean_log(x)
     y = log(x./mean(x));
 end
 
 i = 0; j=0; k=0; %initialize counters for each phase to zero
-while i < max_iter    
+while i < max_iter && ~finished    
     i = i + 1; % update iteration counter
     
     % save good data
@@ -327,7 +390,15 @@ while i < max_iter
         
 		if verbose, fprintf('\t\tmean prediction error: %.15f. changed stepsize from %.2f to %.2f\n', mean(error), stepSize, newStepSize); end
         stepSize = newStepSize;
-	end
+    end
+    
+    if mean(error) < 1e-15,
+        newStepSize = stepSize* 1.2;
+        
+        newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
+        if verbose, fprintf('\t\tmean prediction error: %.15f. changed stepsize from %.2f to %.2f\n', mean(error), stepSize, newStepSize); end
+        stepSize = newStepSize;
+    end
 	
 
     
@@ -395,8 +466,13 @@ busWhiteList = true(size(bus,1),1);
 p2_avoidLagrange = false;
 
 maxStepSize = 0.1;
-minStepSize = 0.000001;
-stepSize = sigmaForVoltage;
+minStepSize = 0.0000001;
+
+try %try to previous voltage step on continuation bus to start with.
+    stepSize = abs(V(continuationBus) - V_saved(continuationBus));
+catch %if this fails (e.g. V_saved was never defined) revert to preset value
+    stepSize = sigmaForVoltage;
+end
 stepSize = min(max(stepSize, minStepSize),maxStepSize);
 j = 0;
 while j < max_iter && ~finished
@@ -416,15 +492,27 @@ while j < max_iter && ~finished
         [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, continuationBus, ref, pv, pq, lagrange_order);
 %         usedLagrange = true;
     end
-   
+    
+    
+    if any(isnan(V_predicted))
+       p2_avoidLagrange = true;
+       if verbose, fprintf('\t\tAbandoning lagrange\n'); end
+       j = j-1; continue;
+    end
+    
 	if abs(lambda_predicted - lambda) > maxStepSize || lambda_predicted < 0,
-        stepSize = stepSize * 0.8;
+        newStepSize = stepSize * 0.8;
+        
         if abs(lambda_predicted - lambda) > 10*maxStepSize,
             p2_avoidLagrange = true;
         end
-        j = j-1;
-        continue;
         
+        if newStepSize > minStepSize,
+            if verbose, fprintf('\t\tPrediction step too large (lambda change of %.4f). Step Size reduced from %.7f to %.7f\n', abs(lambda_predicted - lambda), stepSize, newStepSize); end
+            stepSize = newStepSize;
+            j = j-1;
+            continue;
+        end
 	end
     
     %% do lambda correction to find corrected point
@@ -436,7 +524,10 @@ while j < max_iter && ~finished
 % 	
 %     fprintf('Lambda error: %d
     
-    if abs(lambda - lambda_saved) > maxStepSize, 
+    if abs(lambda - lambda_saved) > maxStepSize %|| ~success, 
+        if abs(lambda - lambda_saved) > maxStepSize * 10,
+            p2_avoidLagrange = true;
+        end
 %         if usedLagrange, 
 %             lagrangeFails = lagrangeFails+1;
 % %             if lagrangeFails
@@ -465,7 +556,7 @@ while j < max_iter && ~finished
         newStepSize = stepSize * 0.2;
         if newStepSize > minStepSize,
             if verbose, fprintf('continuationBus = %d', continuationBus); end
-            if verbose, fprintf('\t\tLambda step too big; lambda step = %3f). Step size reduced from %.6f to %.6f\n', lambda-lambda_saved, stepSize, newStepSize); end
+            if verbose, fprintf('\t\tLambda step too big; lambda step = %3f). Step size reduced from %.7f to %.7f\n', lambda-lambda_saved, stepSize, newStepSize); end
             
              
             stepSize = newStepSize;
@@ -488,10 +579,10 @@ while j < max_iter && ~finished
 	prediction_error = mean(abs(V-V_predicted)./abs(V));
     error_order = log(prediction_error/0.00001);
     
-    if ( mean_step > 0.00001 && ~success) % if we jumped too far and correction step didn't converge
+    if ( (mean_step > 0.00001 || stepSize > 0) && ~success) % if we jumped too far and correction step didn't converge
         newStepSize = stepSize * 0.4;
-        if newStepSize > minStepSize, %if we are not below min step-size threshold go back and try again with new stepSize
-            if verbose, fprintf('\t\tDid not converge; voltage step: %f pu. Step Size reduced from %.6f to %.6f\n', mean_step, stepSize, newStepSize); end
+        if newStepSize >= minStepSize, %if we are not below min step-size threshold go back and try again with new stepSize
+            if verbose, fprintf('\t\tDid not converge; voltage step: %f pu. Step Size reduced from %.7f to %.7f\n', mean_step, stepSize, newStepSize); end
             stepSize = newStepSize;
             V = V_saved;
             lambda= lambda_saved;
@@ -510,10 +601,8 @@ while j < max_iter && ~finished
         newStepSize = stepSize * (1 + 0.2*(error_order < 1) - 0.2*(error_order>1));
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         
-		if verbose && newStepSize ~= stepSize, fprintf('\t\tAdjusting step size from %.6f to %.6f; mean prediction error: %.15f.\n', stepSize, newStepSize, prediction_error); end
-        if newStepSize < 0.000001,
-            keyboard
-        end
+		if verbose && newStepSize ~= stepSize, fprintf('\t\tAdjusting step size from %.7f to %.7f; mean prediction error: %.15f.\n', stepSize, newStepSize, prediction_error); end
+
         stepSize = newStepSize;
     end
 	
@@ -572,7 +661,8 @@ if verbose > 0
 end
 
 
-    function continuationBus = pickBus(avoidPV)
+    function cntBus = pickBus(avoidPV)
+        cntBus_saved = continuationBus;
         if nargin < 1,
             avoidPV = true;
         end
@@ -592,8 +682,10 @@ end
         end
 
         [~, ind] = max(mSlopes(mBuses));
-        continuationBus = mBuses(ind);
-        slope = mSlopes(continuationBus);
+        cntBus = mBuses(ind);
+        slope = mSlopes(cntBus);
+        
+%         if cntBus ~= cntBus_saved, p2_avoidLagrange = false; end
     end
 
 
@@ -612,8 +704,13 @@ flag_lambdaIncrease = false;
 %set step size for Phase 3
 minStepSize = 0.9*stepSize;
 maxStepSize = 2;
+try
+    stepSize = lambda_saved - lambda;
+catch
+   stepSize = stepSize; 
+end
+    
 stepSize = min(max(stepSize, minStepSize),maxStepSize);
-stepSize = lambda_saved - lambda;
 if ~do_phase3, finished = true; end
 
 k = 0;
@@ -660,10 +757,18 @@ while k < max_iter && ~finished
 %         newStepSize = stepSize * (1 + 0.8*(error_order < 1) - 0.8*(error_order>1));
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         
-   		if verbose && newStepSize ~= stepSize, fprintf('\t\tAdjusting step size from %.5f to %.5f; mean prediction error: %.15f.\n', stepSize, newStepSize, prediction_error); end
+   		if verbose && newStepSize ~= stepSize, fprintf('\t\tAdjusting step size from %.6f to %.6f; mean prediction error: %.15f.\n', stepSize, newStepSize, prediction_error); end
         
 % 		if verbose, fprintf('\t\tmean prediction error: %.15f. changed stepsize from %.5f to %.5f\n', mean_error, stepSize, newStepSize); end
         stepSize = newStepSize;
+    elseif mean_step > 0 && prediction_error == 0,
+       %we took a step but prediction was dead on
+        newStepSize = stepSize * 2;
+        newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
+        if verbose && newStepSize ~= stepSize, fprintf('\t\tAdjusting step size from %.6f to %.6f; mean prediction error: %.15f.\n', stepSize, newStepSize, prediction_error); end
+
+        stepSize = newStepSize;
+
     end
    
     if lambda < 0 % lambda is less than 0, then stop CPF simulation
@@ -725,7 +830,7 @@ nSteps = nSteps(1:nPoints);
 stepSizes = stepSizes(1:nPoints);
 max_lambda = max(lambda_corr);
 
-if lambda < max_lambda,
+if lambda <= max_lambda,
     success = true;
 end
 
