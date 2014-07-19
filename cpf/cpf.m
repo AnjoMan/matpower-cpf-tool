@@ -468,6 +468,7 @@ p2_avoidLagrange = false;
 maxStepSize = 0.1;
 minStepSize = 0.0000001;
 
+continuationBus = pickBus(useLagrange);
 try %try to previous voltage step on continuation bus to start with.
     stepSize = abs(V(continuationBus) - V_saved(continuationBus));
 catch %if this fails (e.g. V_saved was never defined) revert to preset value
@@ -494,7 +495,7 @@ while j < max_iter && ~finished
     end
     
     
-    if any(isnan(V_predicted))
+    if (useLagrange && ~p2_avoidLagrange) && any(isnan(V_predicted))
        p2_avoidLagrange = true;
        if verbose, fprintf('\t\tAbandoning lagrange\n'); end
        j = j-1; continue;
@@ -680,10 +681,20 @@ end
         else
             mBuses = [pv pq]; 
         end
+        
+        %try to eliminate buses with 0 real slope
+        newMBuses = setdiff( mBuses, find( (abs(V)-abs(V_saved)) == 0));
+        if ~isempty(newMBuses),
+            mBuses = newMBuses;
+        end
 
         [~, ind] = max(mSlopes(mBuses));
         cntBus = mBuses(ind);
         slope = mSlopes(cntBus);
+        
+        if cntBus == 1,
+            fprintf('wait');
+        end
         
 %         if cntBus ~= cntBus_saved, p2_avoidLagrange = false; end
     end

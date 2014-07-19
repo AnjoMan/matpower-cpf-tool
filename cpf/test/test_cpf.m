@@ -7,7 +7,7 @@ function test_cpf()% close all; clear all; clc
 %     mFault = faults{20509};
 
 
-    mFault = Fault('dual', {[18],[68],[],[]});
+    mFault = Fault('dual', {[],[],[3,5],[]});
     myCases = mFault.applyto(base, true, false);
 
 
