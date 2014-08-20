@@ -7,15 +7,15 @@ function test_cpf()% close all; clear all; clc
 %     mFault = faults{20509};
 
 
-    mFault = Fault('dual', {[],[],[3,5],[]});
-    myCases = mFault.applyto(base, true, false);
+    mFault = Fault('dual', {[8],[],[],[]});
+    myCases = mFault.applyto(base, false, false);
 
 
     myCase = myCases{1};
 %     myCase = myCases{2};
 
 
-    out = cpf(myCase,-1,5,0.025,true, true, true)
+    out = cpf(myCase,-1,1,0.025,true, true, true)
     
 %     out = cpf(base, 7, 5, 0.025, true, true)
 %     [max_lambda, predicted, corrected, combined] = cpf(myCase, -1, 5,0.025,true);
