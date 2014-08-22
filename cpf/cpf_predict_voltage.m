@@ -1,7 +1,7 @@
-function [V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_corr, lambda, sigma, ref,pv, pq,maxDegree)
+function [V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_corr, lambda, sigma, ref,pv, pq, flag_lambdaIncrease,maxDegree  )
 
     
-    if nargin < 8,
+    if nargin < 9,
         maxDegree = 6;
     end
     % degree of Lagrange polynomial is set by length of known data, too
@@ -20,7 +20,11 @@ function [V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr, lambda_co
 
 	
 	%% update lambda
-	lambda_predicted = lambda + sigma;
+    if flag_lambdaIncrease,
+        lambda_predicted = lambda + sigma;
+    else
+        lambda_predicted = lambda - sigma;
+    end
 	
 % 	maxDegree = 10;
 		

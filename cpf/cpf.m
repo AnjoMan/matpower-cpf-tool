@@ -332,8 +332,24 @@ function y= mean_log(x)
     y = log(x./mean(x));
 end
 
+function out = check_stepSizes(thresh)
+    if nargin < 1,
+        thresh = 2;
+    end
+%     vals = [stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize]
+%     a = mean_log([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize])
+%     b = log(abs(diff([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize])))
+%     c = mean_log(abs(diff([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize])))
+%     out = any( abs(mean_log([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize])) > thresh);
+    out = any( mean_log(abs(diff([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize]))) > thresh);
+
+
+end
+
+
 
 i = 0; j=0; k=0; %initialize counters for each phase to zero
+phase1 = true; phase2 = false; phase3 = false;
 while i < max_iter && ~finished    
     i = i + 1; % update iteration counter
     
@@ -341,10 +357,10 @@ while i < max_iter && ~finished
     V_saved = V;
     lambda_saved = lambda;
     
-	if  ~useLagrange || (nPoints<4 || any( abs(mean_log([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize])) > 1) || slope < 1e-10), % do voltage prediction to find predicted point (predicting voltage)
+	if  ~useLagrange || (nPoints<2 || check_stepSizes() || slope * (-1)^~flag_lambdaIncrease < 1e-10), % do voltage prediction to find predicted point (predicting voltage)
 		[V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
     else %if we have enough points, use lagrange polynomial
-		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, ref, pv, pq, lagrange_order);
+		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, ref, pv, pq, flag_lambdaIncrease, lagrange_order);
     end
     
            
@@ -365,9 +381,10 @@ while i < max_iter && ~finished
 	
     
     
-    if i >= 5,
-        demonstratePrediction();
-    end
+%     if i >= 2,
+%         demonstratePrediction();
+%         fprintf('wait');
+%     end
     
     % if voltage correction fails, reduce step size and try again
     if success == false  && stepSize > minStepSize,
@@ -395,7 +412,7 @@ while i < max_iter && ~finished
     error_order = log(mean(error)/ 0.0005);
 
 %     error_order = log(mean(error)/ 0.001);
-    error_order = log(mean(error)/ 0.01);
+%     error_order = log(mean(error)/ 0.01);
 
 
 	if abs(error_order) > 0.5 && mean(error)>0,
@@ -419,7 +436,7 @@ while i < max_iter && ~finished
     
     if success % if correction converged we can save the point and do plotting/output in verbose mode
         logStepResults();        
-		if verbose && shouldIPlotEverything, plotBusCurve(continuationBus); end
+		if verbose && shouldIPlotEverything, plotBusCurve(continuationBus, nPoints+1); end
         nPoints = nPoints + 1;
     end
     
@@ -454,7 +471,7 @@ while i < max_iter && ~finished
         break;    
     end
 end
-
+phase1 = false;
 
 % fprintf('Average prediction error for voltage: %f\n', mean(mean( abs( V_corr - Vpr)./abs(V_corr))));
 % fprintf('Avg num of iterations: %f\n', mean(correctionIters));
@@ -479,7 +496,7 @@ end
 
 p2_avoidLagrange = false;
 
-maxStepSize = 0.1;
+maxStepSize = 0.04;
 minStepSize = 0.0000001;
 
 continuationBus = pickBus(useLagrange);
@@ -492,7 +509,7 @@ stepSize = min(max(stepSize, minStepSize),maxStepSize);
 j = 0;
 
  
-
+phase2 = true;
 while j < max_iter && ~finished
     %% update iteration counter
     j = j + 1;
@@ -503,11 +520,11 @@ while j < max_iter && ~finished
     
     
     %% do lambda prediction to find predicted point (predicting lambda)
-	if ~useLagrange  || p2_avoidLagrange || (nPoints<4 || any( abs(mean_log([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize])) > 0.75) || slope < 1e-10),
+	if ~useLagrange  || p2_avoidLagrange || (nPoints<4 || check_stepSizes() || slope * (-1)^~flag_lambdaIncrease < 1e-10),
         [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, [2, continuationBus], initQPratio, participation_i,flag_lambdaIncrease);
 %         usedLagrange = false;
     else
-        [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, continuationBus, ref, pv, pq, lagrange_order);
+        [V_predicted, lambda_predicted] = cpf_predict_lambda(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda_saved, stepSize, continuationBus, ref, pv, pq, lagrange_order);
 %         usedLagrange = true;
     end
     
@@ -539,8 +556,12 @@ while j < max_iter && ~finished
   
 	
 	[V, lambda, success, iters] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, participation_i, ref, pv, pq, continuationBus);
-% 	
-%     fprintf('Lambda error: %d
+ 	
+%     if nPoints > 2,
+%        demonstratePrediction(max(1,nPoints-10), nPoints); 
+%        fprintf('wait');
+%     end
+    
     
     if abs(lambda - lambda_saved) > maxStepSize %|| ~success, 
         if abs(lambda - lambda_saved) > maxStepSize * 10,
@@ -573,8 +594,8 @@ while j < max_iter && ~finished
 	prediction_error = mean(abs(V-V_predicted)./abs(V));
     
 %     error_order = log(prediction_error/0.000001);
-%     error_order = log(prediction_error/0.000005);
-    error_order = log(prediction_error/0.00001);   
+    error_order = log(prediction_error/0.000005);
+%     error_order = log(prediction_error/0.00001);   
     
     if ( (mean_step > 0.00001 || stepSize > 0) && ~success) % if we jumped too far and correction step didn't converge
         newStepSize = stepSize * 0.4;
@@ -611,7 +632,7 @@ while j < max_iter && ~finished
     
     if success %if correction step converged, log values and do verbosity
 		logStepResults();        
-		if verbose && shouldIPlotEverything, plotBusCurve(continuationBus); end
+		if verbose && shouldIPlotEverything, plotBusCurve(continuationBus, nPoints+1); end
         nPoints = nPoints + 1;
     end
     
@@ -648,7 +669,7 @@ while j < max_iter && ~finished
     
 %     if verbose, fprintf('lambda: %.3f,     slope: %.4f     error: %e    error_order: %f     stepSize: %.15f\n', lambda, slope, prediction_error, error_order,stepSize); end
 end
-
+phase2 = false;
 
 
 
@@ -690,8 +711,8 @@ end
             mBuses = newMBuses;
         end
 
-%         [~, ind] = max(mSlopes(mBuses) .* (-1)^~flag_lambdaIncrease);
-        [~, ind] = max(mSlopes(mBuses));
+        [~, ind] = max(mSlopes(mBuses) .* (-1)^~flag_lambdaIncrease);
+%         [~, ind] = max(mSlopes(mBuses));
         cntBus = mBuses(ind);
         slope = mSlopes(cntBus);
         
@@ -724,6 +745,7 @@ stepSize = min(max(stepSize, minStepSize),maxStepSize);
 if ~do_phase3, finished = true; end
 
 k = 0;
+phase3 = true;
 while k < max_iter && ~finished
     %% update iteration counter
     k = k + 1;
@@ -733,10 +755,10 @@ while k < max_iter && ~finished
     V_saved = V;
     lambda_saved = lambda;
     
-    if  ~useLagrange || (nPoints<4 || any( abs(mean_log([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize])) > 1) || slope < 1e-10), % do voltage prediction to find predicted point (predicting voltage)
+    if  ~useLagrange || (nPoints<4 || check_stepSizes() || slope * (-1)^~flag_lambdaIncrease < 1e-10), % do voltage prediction to find predicted point (predicting voltage)
 		[V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
     else %if we have enough points, use lagrange polynomial
-		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, ref, pv, pq, lagrange_order);
+		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, ref, pv, pq, flag_lambdaIncrease, lagrange_order);
     end
     
 %     %% do voltage prediction to find predicted point (predicting voltage)
@@ -745,6 +767,10 @@ while k < max_iter && ~finished
     %% do voltage correction to find corrected point
     [V, lambda, success, iters] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 	
+%     if nPoints > 2,
+%         demonstratePrediction(max(1,nPoints-10), nPoints);   
+%         fprintf('wait');
+%     end
     mean_step = mean( abs(V-V_saved));        
     if ( mean_step > 0.0001 && ~success) % if we jumped too far and correction step didn't converge
         newStepSize = stepSize * 0.4;
@@ -792,7 +818,7 @@ while k < max_iter && ~finished
     
     if success,
         logStepResults()        
-		if verbose && shouldIPlotEverything, plotBusCurve(continuationBus); end
+		if verbose && shouldIPlotEverything, plotBusCurve(continuationBus, nPoints+1); end
         nPoints = nPoints + 1;        
     end
     
@@ -813,6 +839,7 @@ while k < max_iter && ~finished
         break;        
     end
 end
+phase3=false;
 if verbose > 0, fprintf('\t[Info]:\t%d data points contained in phase 3.\n', k); end
 
 
@@ -826,7 +853,7 @@ if success && do_phase3, %assuming we didn't fail out, try to solve for lambda =
     
     if success,        
 		logStepResults()
-        if shouldIPlotEverything, plotBusCurve(continuationBus); end
+        if shouldIPlotEverything, plotBusCurve(continuationBus, nPoints+1); end
         
         nPoints = nPoints + 1;
     end
@@ -930,18 +957,26 @@ end
         stepSizes(:,nPoints+1) = stepSize;
     end
     
-    function plotBusCurve(bus)
+    function plotBusCurve(bus, mIndex)
         % This function creates a pretty plot of prediction/correction up
         % to the current point, for the bus specified, including colour
         % coding of phases in CPF
+        
+        if nargin<2,
+            mIndex = nPoints;
+        end
         
         
         if bus == GLOBAL_CONTBUS, %if its the same bus as last time, check resizing of window.
             xlims = xlim;
             ylims = ylim;
 
-            xlims(2) = max(xlims(1) + (lambda_corr(nPoints)- xlims(1)) * 1.2, xlims(2));
-            ylims(1) = min(ylims(2) - (ylims(2) - abs(V_corr(bus,nPoints)))*1.2, ylims(1));
+            xlims(1) = min(xlims(1),  lambda_corr(mIndex) - (xlims(2) - lambda_corr(mIndex)) * 0.1);
+            xlims(2) = max(xlims(2),  lambda_corr(mIndex) + (lambda_corr(mIndex) - xlims(1)) * 0.1);
+%             xlims(2) = max(xlims(1) + (lambda_corr(nPoints)- xlims(1)) * 1.2, xlims(2));
+%             ylims(1) = min(ylims(2) - (ylims(2) - abs(V_corr(bus,nPoints)))*1.2, ylims(1));
+            ylims(1) = min(ylims(1), abs(V_corr(bus,mIndex)) - (ylims(2) - abs(V_corr(bus,mIndex)))*0.1);
+            ylims(2) = max(ylims(2), abs(V_corr(bus,mIndex)) + (abs(V_corr(bus,mIndex)) - ylims(1))*0.1);
         end
         %plot phase 3
         p3=plot(lambda_corr(1+i+j:1+i+j+k), abs(V_corr(bus, 1+i+j:1+i+j+k)), '.-b', 'markers',12); hold on;
@@ -991,7 +1026,7 @@ end
         a = 1;
     end
 
-    function demonstratePrediction()
+    function demonstratePrediction(startPt, endPt)
         % Use this function to demonstrate the difference between lagrange
         % versus linear approximation during the prediction step.
         %
@@ -1004,59 +1039,104 @@ end
         % [V, lambda] = cpf_correct(...);
         %
         % if i >= 4,
-        %     demonstratePrediction()
+        %     demonstratePrediction();
+        %     %equivalent to:
+        %     % demonstratePrediction(1,i);
         % end
+        
+        if nargin < 1,
+            startPt = 1;
+        end
+        if nargin < 2, 
+        endPt = nPoints;
+        end
+        
+        pts_to_take = startPt:endPt;
 
         %plot previous points
-        prev_corr = plot( lambda_corr(1:i), abs(V_corr(continuationBus,1:i)), 'b.-');    
-        hold on; prev_pr = scatter(lambda_pr(1:i), abs(V_pr(continuationBus,1:i)), 'r'); hold off;
+        prev_pr = scatter(lambda_pr(pts_to_take), abs(V_pr(continuationBus,pts_to_take)), 'r', 'MarkerFaceColor', 'r');
+         hold on;prev_corr = plot( lambda_corr(pts_to_take), abs(V_corr(continuationBus,pts_to_take)), 'b.-', 'LineWidth', 1);  hold off;
 
 
         %define the range over which to compute predictions
-        sigmaRange = max( -2*stepSize, -lambda_saved):0.001: 2*stepSize;
+        sigmaRange = max( -1.2*stepSize, -lambda_saved):0.001: 1.2*stepSize;
 
 
         times = zeros(1, length(sigmaRange));
+        
+        
+        
+        
+        
+        
         %get linear predictions
         V_linear = zeros(1, length(sigmaRange));   l_linear = zeros(1,length(sigmaRange));
         for sample = 1:length(sigmaRange),
-            tic;
-            [mVs, mL,~] = cpf_predict(Ybus, ref, pv, pq, V_saved, lambda_saved, sigmaRange(sample), 1, initQPratio, participation_i, flag_lambdaIncrease);
-            times(sample) = toc;
+            if phase1 || phase3,
+                tic;
+                [mVs, mL,~] = cpf_predict(Ybus, ref, pv, pq, V_saved, lambda_saved, sigmaRange(sample), 1, initQPratio, participation_i, flag_lambdaIncrease);
+                times(sample) = toc;
+            elseif phase2,
+                tic;
+                [mVs, mL, ~] = cpf_predict(Ybus, ref, pv, pq, V_saved, lambda_saved, sigmaRange(sample), [2, continuationBus], initQPratio, participation_i,flag_lambdaIncrease);
+                times(sample) = toc;
+
+            end
             V_linear(sample) = abs(mVs(continuationBus)); l_linear(sample) = mL;
         end
         
         fprintf('average of %d iterations of linear predictor: %f seconds\n', length(sigmaRange), mean(times));
+        
+        
+        
+        
+        
+        
         %get lagrange predictions
         V_lagrange = zeros(1, length(sigmaRange));  l_lagrange = zeros(1, length(sigmaRange));
 
         for sample = 1:length(sigmaRange)
-            tic;
-                [mVs, mL] = cpf_predict_voltage(V_corr(:,1:i), lambda_corr(1:i), lambda_saved, sigmaRange(sample), ref, pv, pq, lagrange_order);
-            times(sample) = toc;
+            if phase1 || phase3,
+                tic;
+                    [mVs, mL] = cpf_predict_voltage(V_corr(:,1:endPt), lambda_corr(1:endPt), lambda_saved, sigmaRange(sample), ref, pv, pq, flag_lambdaIncrease, lagrange_order);
+                times(sample) = toc;
+            elseif phase2,
+                tic;
+                    [mVs, mL] = cpf_predict_lambda(V_corr(:,1:endPt), lambda_corr(1:endPt), lambda_saved, sigmaRange(sample), continuationBus, ref, pv, pq, lagrange_order);
+                times(sample) = toc;
+            end    
+              
                 V_lagrange(sample) = abs(mVs(continuationBus));   l_lagrange(sample) = mL;
         end
         
         fprintf('average of %d iterations of lagrange predictor: %f seconds\n', length(sigmaRange), mean(times));
 
         %plot prediction curves
-        hold on; lin_prs = plot(l_linear, V_linear, 'g-.'); hold off;
-        hold on; lag_prs = plot(l_lagrange, V_lagrange, 'm--'); hold off;
+        hold on; lin_prs = plot(l_linear, V_linear, 'g-.','LineWidth', 2); hold off;
+        hold on; lag_prs = plot(l_lagrange, V_lagrange, 'm--','LineWidth', 2); hold off;
 
 
 
         %get linear prediction point at stepSize
-        [mVs, mL,~] = cpf_predict(Ybus, ref, pv, pq, V_saved, lambda_saved, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);   
-        hold on; lin_pr = scatter(mL, abs(mVs(continuationBus)), 'c^'); hold off;
+        if phase1 || phase3,
+            [mVs, mL,~] = cpf_predict(Ybus, ref, pv, pq, V_saved, lambda_saved, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
+        elseif phase2,
+            [mVs, mL, ~] = cpf_predict(Ybus, ref, pv, pq, V_saved, lambda_saved, stepSize, [2, continuationBus], initQPratio, participation_i,flag_lambdaIncrease);
+        end
+        hold on; lin_pr = scatter(mL, abs(mVs(continuationBus)), 'c^', 'MarkerFaceColor','c'); hold off;
 
         %get lagrange prediction point at stepSize
-        [mVs, mL] = cpf_predict_voltage(V_corr(:,1:i), lambda_corr(1:i), lambda_saved, stepSize, ref, pv, pq, lagrange_order);    
-        hold on; lag_pr = scatter(mL, abs(mVs(continuationBus)), 'cv'); hold off;
+        if phase1 || phase3,
+            [mVs, mL] = cpf_predict_voltage(V_corr(:,1:endPt), lambda_corr(1:endPt), lambda_saved, stepSize, ref, pv, pq, flag_lambdaIncrease, lagrange_order);    
+        elseif phase2,
+            [mVs, mL] = cpf_predict_lambda(V_corr(:,1:endPt), lambda_corr(1:endPt), lambda_saved, stepSize, continuationBus, ref, pv, pq, lagrange_order);
+        end
+        hold on; lag_pr = scatter(mL, abs(mVs(continuationBus)), 'cv','MarkerFaceColor','c'); hold off;
 
 
         %plot solution to correction
-        hold on;  plot( [lambda_corr(i), lambda], [abs(V_corr(continuationBus,i)), abs(V(continuationBus))], 'b')
-        hold on; corr = scatter(lambda, abs(V(continuationBus)), 'bs'); hold off;
+        hold on;  plot( [lambda_corr(endPt), lambda], [abs(V_corr(continuationBus,endPt)), abs(V(continuationBus))], 'b')
+        hold on; corr = scatter(lambda, abs(V(continuationBus)), 'bs','MarkerFaceColor','b'); hold off;
 
         %detail the plot
         legend( [prev_pr, prev_corr, lin_prs, lag_prs, lin_pr, lag_pr, corr], ...

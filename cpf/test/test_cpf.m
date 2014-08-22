@@ -1,8 +1,8 @@
 function test_cpf()% close all; clear all; clc
     close all;
     
-    base = loadcase('case118_mod');
-%     base = loadcase('case30_mod');
+%     base = loadcase('case118_mod');
+    base = loadcase('case30_mod');
 %     faults = defineFaults(base,2);
 %     mFault = faults{20509};
 
