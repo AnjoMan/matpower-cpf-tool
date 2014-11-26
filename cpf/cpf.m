@@ -145,9 +145,26 @@ participation_i = participation_i ./ sum(participation_i); %normalize
 
 
 
+
+
+
+
+
 %specify whether or not to use lagrange polynomial interpolation when
 %possible; default is true
 useLagrange=true;
+useAdaptive=true;
+
+strs = {'no', 'yes'};
+fprintf('\t[Info]:\tLagrange: %s\n', strs{useLagrange+1});
+fprintf('\t[Info]:\tAdaptive Step Size: %s\n', strs{useAdaptive+1});
+
+
+
+
+
+
+
 
 
 
@@ -325,7 +342,10 @@ maxStepSize = 200;
 
 stepSize = sigmaForLambda;
 % stepSize = 10;
-stepSize = min(max(stepSize, minStepSize),maxStepSize);
+
+if useAdaptive,
+    stepSize = min(max(stepSize, minStepSize),maxStepSize);
+end
 
 
 function y= mean_log(x)
@@ -333,9 +353,7 @@ function y= mean_log(x)
 end
 
 function out = check_stepSizes(thresh)
-    if nargin < 1,
-        thresh = 2;
-    end
+    if nargin < 1, thresh = 2;  end
 %     vals = [stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize]
 %     a = mean_log([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize])
 %     b = log(abs(diff([stepSizes(max(1,nPoints-lagrange_order+1):nPoints), stepSize])))
@@ -357,7 +375,8 @@ while i < max_iter && ~finished
     V_saved = V;
     lambda_saved = lambda;
     
-	if  ~useLagrange || (nPoints<2 || check_stepSizes() || slope * (-1)^~flag_lambdaIncrease < 1e-10), % do voltage prediction to find predicted point (predicting voltage)
+	if  ~useLagrange ||  (nPoints<2 || check_stepSizes() || slope * (-1)^~flag_lambdaIncrease < 1e-10), % do voltage prediction to find predicted point (predicting voltage)
+        %fallback to first-order approximation
 		[V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
     else %if we have enough points, use lagrange polynomial
 		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, ref, pv, pq, flag_lambdaIncrease, lagrange_order);
@@ -366,7 +385,7 @@ while i < max_iter && ~finished
            
     %% check prediction to make sure step is not too big so as to cause non-convergence    
     error_predicted = max(abs(V_predicted- V));
-    if error_predicted > maxStepSize && ~success %-> this is inappropriate since 'success' would be coming from previous correction step
+    if useAdaptive && error_predicted > maxStepSize && ~success %-> this is inappropriate since 'success' would be coming from previous correction step
         newStepSize = 0.8*stepSize; %cut down the step size to reduce the prediction error
         if newStepSize > minStepSize,
             if verbose, fprintf('\t\tPrediction step too large (voltage change of %.4f). Step Size reduced from %.5f to %.5f\n', error_predicted, stepSize, newStepSize); end
@@ -380,14 +399,14 @@ while i < max_iter && ~finished
     [V, lambda, success, iters] = cpf_correctVoltage(baseMVA, bus, gen, Ybus, V_predicted, lambda_predicted, initQPratio, participation_i);
 	
     
-    
+%     
 %     if i >= 2,
 %         demonstratePrediction();
 %         fprintf('wait');
 %     end
     
     % if voltage correction fails, reduce step size and try again
-    if success == false  && stepSize > minStepSize,
+    if useAdaptive && success == false  && stepSize > minStepSize,
         newStepSize = stepSize * 0.3;
         if newStepSize > minStepSize,	
             if verbose, fprintf('\t\tCorrection step didnt converge; changed stepsize from %.5f to: %.5f\n', stepSize, newStepSize); end
@@ -408,14 +427,14 @@ while i < max_iter && ~finished
     
     %% if successful, check max error and adjust step sized to get a better error (meaning, balanced between a bigger step size and making sure we still converge)
 	error = abs(V-V_predicted)./abs(V);
-    error_order = log(mean(error)/ 0.0001);
+%     error_order = log(mean(error)/ 0.0001);
     error_order = log(mean(error)/ 0.0005);
 
 %     error_order = log(mean(error)/ 0.001);
 %     error_order = log(mean(error)/ 0.01);
 
-
-	if abs(error_order) > 0.5 && mean(error)>0,
+    
+	if useAdaptive && abs(error_order) > 0.5 && mean(error)>0,
 %         newStepSize = stepSize - 0.1*error_order); %adjust step size
         newStepSize = stepSize - 0.07*error_order; %adjust step size
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
@@ -424,7 +443,7 @@ while i < max_iter && ~finished
         stepSize = newStepSize;
     end
     
-    if mean(error) < 1e-15,
+    if useAdaptive && mean(error) < 1e-15,
         newStepSize = stepSize* 1.2;
         
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
@@ -500,12 +519,19 @@ maxStepSize = 0.04;
 minStepSize = 0.0000001;
 
 continuationBus = pickBus(useLagrange);
-try %try to previous voltage step on continuation bus to start with.
-    stepSize = abs(V(continuationBus) - V_saved(continuationBus));
-catch %if this fails (e.g. V_saved was never defined) revert to preset value
+
+
+if useAdaptive,
+    try %try to previous voltage step on continuation bus to start with.
+        stepSize = abs(V(continuationBus) - V_saved(continuationBus));
+    catch %if this fails (e.g. V_saved was never defined) revert to preset value
+        stepSize = sigmaForVoltage;
+    end
+    stepSize = min(max(stepSize, minStepSize),maxStepSize);
+else
     stepSize = sigmaForVoltage;
 end
-stepSize = min(max(stepSize, minStepSize),maxStepSize);
+    
 j = 0;
 
  
@@ -520,7 +546,7 @@ while j < max_iter && ~finished
     
     
     %% do lambda prediction to find predicted point (predicting lambda)
-	if ~useLagrange  || p2_avoidLagrange || (nPoints<4 || check_stepSizes() || slope * (-1)^~flag_lambdaIncrease < 1e-10),
+	if ~useLagrange  || (~useAdaptive && j <= lagrange_order) || p2_avoidLagrange || (nPoints<4 || check_stepSizes() || slope * (-1)^~flag_lambdaIncrease < 1e-10),
         [V_predicted, lambda_predicted, J] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, [2, continuationBus], initQPratio, participation_i,flag_lambdaIncrease);
 %         usedLagrange = false;
     else
@@ -535,7 +561,7 @@ while j < max_iter && ~finished
        j = j-1; continue;
     end
     
-	if abs(lambda_predicted - lambda) > maxStepSize || lambda_predicted < 0,
+	if useAdaptive && abs(lambda_predicted - lambda) > maxStepSize || lambda_predicted < 0,
         newStepSize = stepSize * 0.8;
         
         if abs(lambda_predicted - lambda) > 10*maxStepSize,
@@ -563,7 +589,7 @@ while j < max_iter && ~finished
 %     end
     
     
-    if abs(lambda - lambda_saved) > maxStepSize %|| ~success, 
+    if useAdaptive && abs(lambda - lambda_saved) > maxStepSize %|| ~success, 
         if abs(lambda - lambda_saved) > maxStepSize * 10,
             p2_avoidLagrange = true;
         end
@@ -597,7 +623,7 @@ while j < max_iter && ~finished
     error_order = log(prediction_error/0.000005);
 %     error_order = log(prediction_error/0.00001);   
     
-    if ( (mean_step > 0.00001 || stepSize > 0) && ~success) % if we jumped too far and correction step didn't converge
+    if useAdaptive && ( (mean_step > 0.00001 || stepSize > 0) && ~success) % if we jumped too far and correction step didn't converge
         newStepSize = stepSize * 0.4;
         if newStepSize >= minStepSize, %if we are not below min step-size threshold go back and try again with new stepSize
             if verbose, fprintf('\t\tDid not converge; voltage step: %f pu. Step Size reduced from %.7f to %.7f\n', mean_step, stepSize, newStepSize); end
@@ -611,7 +637,7 @@ while j < max_iter && ~finished
     
     
     
-    if abs(error_order) > 0.75 && prediction_error>0,
+    if useAdaptive && abs(error_order) > 0.75 && prediction_error>0,
 %     if abs(error_order) > 1.5 && prediction_error>0, 
         %if we havent just dropped the stepSize, consider changing it to
         %get a better error outcome. this allows us to increase our steps
@@ -682,16 +708,10 @@ end
 
     function cntBus = pickBus(avoidPV)
         % Describes the process for picking a continuation Bus for the next
-        % iteration
-        
-        
-        
-        cntBus_saved = continuationBus;
-        if nargin < 1,
-            avoidPV = true;
-        end
+        % iteration       
+        if nargin < 1, avoidPV = true; end
 
-            %how to pick the continuation bus during Phase 2:
+      %how to pick the continuation bus during Phase 2:
         % 1. calculate slope (dP/dLambda) at current point
         mSlopes = abs(V-V_saved)./(lambda-lambda_saved);
 
@@ -699,25 +719,37 @@ end
         if flag_lambdaIncrease && any(mSlopes < 0), flag_lambdaIncrease = false; end
 
         % 3. choose the buses that could be continuation buses.
-        if avoidPV,
-            mBuses  = pq;
-        else
-            mBuses = [pv pq]; 
+        if avoidPV, mBuses  = pq;
+        else mBuses = [pv; pq]; 
         end
         
         %try to eliminate buses with 0 real slope
         newMBuses = setdiff( mBuses, find( (abs(V)-abs(V_saved)) == 0));
-        if ~isempty(newMBuses),
-            mBuses = newMBuses;
-        end
+        if ~isempty(newMBuses), mBuses = newMBuses; end
 
         [~, ind] = max(mSlopes(mBuses) .* (-1)^~flag_lambdaIncrease);
-%         [~, ind] = max(mSlopes(mBuses));
         cntBus = mBuses(ind);
-        slope = mSlopes(cntBus);
-        
-%         if cntBus ~= cntBus_saved, p2_avoidLagrange = false; end
+        slope = mSlopes(cntBus);     
     end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -733,15 +765,23 @@ flag_lambdaIncrease = false;
 
 
 %set step size for Phase 3
-minStepSize = 0.9*stepSize;
-maxStepSize = 2;
-try
-    stepSize = lambda_saved - lambda;
-catch
-   stepSize = stepSize; 
+
+if useAdaptive,
+    minStepSize = 0.9*stepSize;
+    maxStepSize = 2;
+    try
+        stepSize = lambda_saved - lambda;
+    catch
+       stepSize = stepSize; 
+    end
+
+    stepSize = min(max(stepSize, minStepSize),maxStepSize);
+
+else
+    stepSize = sigmaForLambda;
 end
-    
-stepSize = min(max(stepSize, minStepSize),maxStepSize);
+
+
 if ~do_phase3, finished = true; end
 
 k = 0;
@@ -772,7 +812,7 @@ while k < max_iter && ~finished
 %         fprintf('wait');
 %     end
     mean_step = mean( abs(V-V_saved));        
-    if ( mean_step > 0.0001 && ~success) % if we jumped too far and correction step didn't converge
+    if useAdaptive && ( mean_step > 0.0001 && ~success) % if we jumped too far and correction step didn't converge
         newStepSize = stepSize * 0.4;
         if newStepSize > minStepSize, %if we are not below min step-size threshold go back and try again with new stepSize
             if verbose, fprintf('\t\tDid not converge; voltage step: %f pu. Step Size reduced from %.5f to %.5f\n', mean_step, stepSize, newStepSize); end
@@ -788,7 +828,7 @@ while k < max_iter && ~finished
 %     error_order = log(mean(error)/ 0.005);
 
     
-    if abs(error_order) > 0.8 && prediction_error>0,
+    if useAdaptive && abs(error_order) > 0.8 && prediction_error>0,
 %         newStepSize = stepSize - 0.03*error_order; %adjust step size
         newStepSize = stepSize - 0.03*error_order; %adjust step size
 
@@ -799,7 +839,7 @@ while k < max_iter && ~finished
         
 % 		if verbose, fprintf('\t\tmean prediction error: %.15f. changed stepsize from %.5f to %.5f\n', mean_error, stepSize, newStepSize); end
         stepSize = newStepSize;
-    elseif mean_step > 0 && prediction_error == 0,
+    elseif useAdaptive && mean_step > 0 && prediction_error == 0,
        %we took a step but prediction was dead on
         newStepSize = stepSize * 2;
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
@@ -915,6 +955,7 @@ end
 et = etime(clock, t0);
 
 if verbose > 0, 
+    fprintf('\t[Info]:\tMax Lambda Value: %.4f\n', max_lambda);
     fprintf('\t[Info]:\tAverage step size: %.6f\n', mean(stepSizes));
     fprintf('\t[Info]:\tAverage # iterations: %.2f\n', mean(nSteps)); 
     fprintf('\t[Info]:\tCompletion time: %.3f seconds.\n', et); 
@@ -978,30 +1019,36 @@ end
             ylims(1) = min(ylims(1), abs(V_corr(bus,mIndex)) - (ylims(2) - abs(V_corr(bus,mIndex)))*0.1);
             ylims(2) = max(ylims(2), abs(V_corr(bus,mIndex)) + (abs(V_corr(bus,mIndex)) - ylims(1))*0.1);
         end
+        
+        markerSize = 8;
+        
+        
+        pred = plot(lambda_pr(1:1+i+j+k), abs(V_pr(bus,1:1+i+j+k)),'o', 'Color', [0.9137,0.4275,0.5451], 'LineWidth', 2); hold on;
+        
+        
         %plot phase 3
-        p3=plot(lambda_corr(1+i+j:1+i+j+k), abs(V_corr(bus, 1+i+j:1+i+j+k)), '.-b', 'markers',12); hold on;
+        p3=plot(lambda_corr(1+i+j:1+i+j+k), abs(V_corr(bus, 1+i+j:1+i+j+k)), '.-b', 'markers',markerSize, 'Color', [  0.2510    0.5412    0.8235]); hold on;
         
         %plot phase 2
-        p2=plot(lambda_corr(1+i:1+i+j), abs(V_corr(bus, 1+i:1+i+j)), '.-g', 'markers', 12);
+        p2=plot(lambda_corr(1+i:1+i+j), abs(V_corr(bus, 1+i:1+i+j)), '.-g', 'markers', markerSize, 'Color', [0.3490    0.7765    0.4078]);
         
         %plot phase 1
-        p1=plot(lambda_corr(1:1+i), abs(V_corr(bus,1:i+1)), '.-b', 'markers', 12);
+        p1=plot(lambda_corr(1:1+i), abs(V_corr(bus,1:i+1)), '.-b', 'markers', markerSize, 'Color', [  0.2510    0.5412    0.8235]);
         
         
         %plot initial point
-        st=plot(lambda_corr(1), abs(V_corr(bus,1)), '.-k', 'markers', 12);
+        st=plot(lambda_corr(1), abs(V_corr(bus,1)), '.-k', 'markers', markerSize);
              
-        if 1+i+j+k < nPoints,
-            en=plot(lambda_corr(end-1:end), abs(V_corr(bus, end-1:end)),'.-k', 'markers', 12);
-            
-            scatter(lambda_pr(nPoints), abs(V_pr(bus, nPoints)), 'r');
+        if 1+i+j+k < nPoints,             
+            plot( lambda_pr(nPoints), abs(V_pr(bus,nPoints)),'o', 'Color', [0.9137,0.4275,0.5451],'LineWidth', 2)
+            en=plot(lambda_corr(end-1:end), abs(V_corr(bus, end-1:end)),'.-k', 'markers', markerSize);                       
         end
 %         fprintf('Points in 1, Phase 1, Phase 2, Phase 3: %d. Total Points: %d',1+i+j+k, pointCnt)
         
-        pred=scatter(lambda_pr(1:1+i+j+k), abs(V_pr(bus,1:1+i+j+k)),'r'); hold off;
+%         pred=scatter(lambda_pr(1:1+i+j+k), abs(V_pr(bus,1:1+i+j+k)),'r'); hold off;
         
         
-        title(sprintf('Power-Voltage curve for bus %d.', continuationBus));
+%         title(sprintf('Power-Voltage curve for bus %d.', continuationBus));
         ylabel('Voltage (p.u.)')
         xlabel('Power (lambda load scaling factor)');
         ml = max(lambda_corr);
@@ -1024,6 +1071,15 @@ end
         
         GLOBAL_CONTBUS = bus;
         a = 1;
+        
+        set(gca, 'xcolor', [0 0 0],...
+         'ycolor', [0 0 0],...
+         'color', 'none');
+     
+
+        set(gcf, 'color', 'none',...
+                 'inverthardcopy', 'off');
+
     end
 
     function demonstratePrediction(startPt, endPt)
@@ -1060,6 +1116,7 @@ end
 
         %define the range over which to compute predictions
         sigmaRange = max( -1.2*stepSize, -lambda_saved):0.001: 1.2*stepSize;
+        sigmaRange = linspace(max( -1.2*stepSize, -lambda_saved), 1.2*stepSize, 4000);
 
 
         times = zeros(1, length(sigmaRange));
@@ -1153,6 +1210,8 @@ end
         ylabel('Voltage (p.u.)');
         xlabel('Power (lambda load scaling factor)');
         fprintf('done')
+        
+        
 
     end
 
