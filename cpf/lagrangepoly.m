@@ -30,6 +30,10 @@ function   Lx = lagrangepoly(x, xs, ys)
 	end
 
 	Lx = ys * Lj;
+    
+%     figure; plot(xs, ys(21,:), 'b.-');
+%     hold on; plot(x, Lx(21), 'ro'); hold off;
+    
 
 end
 % 

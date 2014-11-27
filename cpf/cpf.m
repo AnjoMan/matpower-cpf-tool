@@ -99,7 +99,11 @@ if nargin < 5, verbose = 0; end
 if nargin < 6, shouldIPlotEverything = false; else shouldIPlotEverything = plotting; end
 if nargin < 7, do_phase3 = true; end
 
+boolStr = {'no', 'yes'};
 if verbose, fprintf('CPF\n'); figure; end
+
+
+if verbose, fprintf('\t[Info]:\tDo Phase 3?: %s\n', boolStr{do_phase3+1}); end
 
 mError = MException('CPF:cpf', 'cpf_error');
 %% options
@@ -108,6 +112,8 @@ max_iter = 1000;                 % depends on selection of stepsizes
 %% ...we use PV curve slopes as the criteria for switching modes
 slopeThresh_Phase1 = 0.5;       % PV curve slope shreshold for voltage prediction-correction (with lambda increasing)
 slopeThresh_Phase2 = 0.3;       % PV curve slope shreshold for lambda prediction-correction
+
+slopeThresh_Phase2 = 0.7;
 
 
 %% load the case & convert to internal bus numbering
@@ -152,12 +158,12 @@ participation_i = participation_i ./ sum(participation_i); %normalize
 
 %specify whether or not to use lagrange polynomial interpolation when
 %possible; default is true
-useLagrange=true;
-useAdaptive=true;
+useLagrange=false;
+useAdaptive=false;
 
 strs = {'no', 'yes'};
-fprintf('\t[Info]:\tLagrange: %s\n', strs{useLagrange+1});
-fprintf('\t[Info]:\tAdaptive Step Size: %s\n', strs{useAdaptive+1});
+if verbose, fprintf('\t[Info]:\tLagrange: %s\n', strs{useLagrange+1}); end
+if verbose, fprintf('\t[Info]:\tAdaptive Step Size: %s\n', strs{useAdaptive+1}); end
 
 
 
@@ -423,6 +429,8 @@ while i < max_iter && ~finished
     %% calculate slope (dP/dLambda) at current point
 	[slope, ~] = max(abs(V-V_saved)  ./ (lambda-lambda_saved)); %calculate maximum slope at current point.
 	
+    
+  
 
     
     %% if successful, check max error and adjust step sized to get a better error (meaning, balanced between a bigger step size and making sure we still converge)
@@ -434,13 +442,22 @@ while i < max_iter && ~finished
 %     error_order = log(mean(error)/ 0.01);
 
     
-	if useAdaptive && abs(error_order) > 0.5 && mean(error)>0,
+	if useAdaptive && abs(error_order) > 0.5 && mean(error)>0, % adjust step size to improve error outcome
 %         newStepSize = stepSize - 0.1*error_order); %adjust step size
         newStepSize = stepSize - 0.07*error_order; %adjust step size
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         
 		if verbose, fprintf('\t\tmean prediction error: %.15f. changed stepsize from %.2f to %.2f\n', mean(error), stepSize, newStepSize); end
         stepSize = newStepSize;
+    end
+    
+    
+    if useAdaptive && success && nPoints < 2 && slope > slopeThresh_Phase1, %dampen step size in cases where slope is reduced too quickly.
+       newStepSize = stepSize * 0.01;
+       if newStepSize > 0.000001,
+            if verbose, fprintf('\t\tArrived at Phase 2 too quickly; changed stepsize from %.5f to: %.5f\n', stepSize, newStepSize); end
+            stepSize = newStepSize;
+       end
     end
     
     if useAdaptive && mean(error) < 1e-15,
@@ -450,6 +467,7 @@ while i < max_iter && ~finished
         if verbose, fprintf('\t\tmean prediction error: %.15f. changed stepsize from %.2f to %.2f\n', mean(error), stepSize, newStepSize); end
         stepSize = newStepSize;
     end
+    
 	
 
     
@@ -523,7 +541,13 @@ continuationBus = pickBus(useLagrange);
 
 if useAdaptive,
     try %try to previous voltage step on continuation bus to start with.
-        stepSize = abs(V(continuationBus) - V_saved(continuationBus));
+        if stepSize < maxStepSize, %check that step size hasn't been reduced already
+            stepSize = stepSize;
+        else
+            stepSize = abs(V(continuationBus) - V_saved(continuationBus));
+        end
+        
+        
     catch %if this fails (e.g. V_saved was never defined) revert to preset value
         stepSize = sigmaForVoltage;
     end
@@ -554,6 +578,9 @@ while j < max_iter && ~finished
 %         usedLagrange = true;
     end
     
+    if verbose && shouldIPlotEverything,
+        hold on; plot(lambda_predicted, abs(V_predicted(continuationBus)), 'go'); hold off;
+    end
     
     if (useLagrange && ~p2_avoidLagrange) && any(isnan(V_predicted))
        p2_avoidLagrange = true;
@@ -583,6 +610,14 @@ while j < max_iter && ~finished
 	
 	[V, lambda, success, iters] = cpf_correctLambda(baseMVA, bus, gen, Ybus, Vm_assigned, V_predicted, lambda_predicted, initQPratio, participation_i, ref, pv, pq, continuationBus);
  	
+    if verbose && shouldIPlotEverything
+        hold on; plot(lambda, abs(V(continuationBus)), 'b.'); hold off;
+    end
+    
+    
+    if ~success,
+        fprintf('fail');
+    end
 %     if nPoints > 2,
 %        demonstratePrediction(max(1,nPoints-10), nPoints); 
 %        fprintf('wait');
@@ -597,7 +632,7 @@ while j < max_iter && ~finished
         % ...otherwise, reduce the step size, discard and try again
         newStepSize = stepSize * 0.2;
         if newStepSize > minStepSize,
-            if verbose, fprintf('continuationBus = %d', continuationBus); end
+            if verbose, fprintf('\t\tcontinuationBus = %d', continuationBus); end
             if verbose, fprintf('\t\tLambda step too big; lambda step = %3f). Step size reduced from %.7f to %.7f\n', lambda-lambda_saved, stepSize, newStepSize); end            
              
             stepSize = newStepSize;
@@ -643,7 +678,7 @@ while j < max_iter && ~finished
         %get a better error outcome. this allows us to increase our steps
         %to go faster or reduce our steps to avoid non-convergence, which
         %is time consuming.
-        newStepSize = stepSize * (1 + 0.2*(error_order < 1) - 0.2*(error_order>1));
+        newStepSize = stepSize * (1 + 0.15*(error_order < 1) - 0.15*(error_order>1));
         newStepSize = max( min(newStepSize,maxStepSize),minStepSize); %clamp step size
         
 		if verbose && newStepSize ~= stepSize, fprintf('\t\tAdjusting step size from %.7f to %.7f; mean prediction error: %.15f.\n', stepSize, newStepSize, prediction_error); end
@@ -681,8 +716,7 @@ while j < max_iter && ~finished
 			if ~success, 
 				if ~isempty(strfind(lastwarn, 'singular'))
 					fprintf('\t[Info]:\tMatrix is singular. Aborting Correction.\n');
-					lastwarn('No error');
-					break;
+					lastwarn('No error'); break;
 				else
 					fprintf('\t[Info]:\tLambda correction fails.\n');
 				end
@@ -696,6 +730,13 @@ while j < max_iter && ~finished
 %     if verbose, fprintf('lambda: %.3f,     slope: %.4f     error: %e    error_order: %f     stepSize: %.15f\n', lambda, slope, prediction_error, error_order,stepSize); end
 end
 phase2 = false;
+
+if ~success && lambda_corr(nPoints) > lambda_corr(nPoints-1),
+    %failed out before reaching the nose    
+    if verbose, fprintf('\t\t[Info]:\tFailed out of Phase 2 before reaching PV nose. Aborting...\n'); end
+    mError = MException('CPF:convergeError', 'Phase 2 voltage correction failed before reaching nose.');
+    throw(mError);
+end
 
 
 
@@ -767,7 +808,7 @@ flag_lambdaIncrease = false;
 %set step size for Phase 3
 
 if useAdaptive,
-    minStepSize = 0.9*stepSize;
+    minStepSize = 0.2*stepSize;
     maxStepSize = 2;
     try
         stepSize = lambda_saved - lambda;
@@ -780,7 +821,6 @@ if useAdaptive,
 else
     stepSize = sigmaForLambda;
 end
-
 
 if ~do_phase3, finished = true; end
 
@@ -795,7 +835,7 @@ while k < max_iter && ~finished
     V_saved = V;
     lambda_saved = lambda;
     
-    if  ~useLagrange || (nPoints<4 || check_stepSizes() || slope * (-1)^~flag_lambdaIncrease < 1e-10), % do voltage prediction to find predicted point (predicting voltage)
+    if  ~useLagrange || (~useAdaptive && k < lagrange_order) || (nPoints<4 || check_stepSizes() || slope * (-1)^~flag_lambdaIncrease < 1e-10), % do voltage prediction to find predicted point (predicting voltage)
 		[V_predicted, lambda_predicted, ~] = cpf_predict(Ybus, ref, pv, pq, V, lambda, stepSize, 1, initQPratio, participation_i, flag_lambdaIncrease);
     else %if we have enough points, use lagrange polynomial
 		[V_predicted, lambda_predicted] = cpf_predict_voltage(V_corr(:,1:nPoints), lambda_corr(1:nPoints), lambda, stepSize, ref, pv, pq, flag_lambdaIncrease, lagrange_order);
